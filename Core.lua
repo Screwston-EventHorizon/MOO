@@ -5,7 +5,7 @@
 local ADDON, ns = ...
 _G.MOO = ns
 
-ns.VERSION = "0.9.0-alpha"
+ns.VERSION = "0.11.0-alpha"
 ns.PREFIX  = "MOO1"
 
 -- Cross-guild: MOO users in every Olympus guild share one hidden channel.
@@ -41,12 +41,49 @@ function ns.Safe(default, fn, ...)
 end
 
 -- Full "Name-Realm" so names from rosters and addon messages match.
+-- One form for every player name: "Name-Realm", with your own realm always spelled
+-- the same way (the server's capitalization can differ from GetNormalizedRealmName).
+-- The name is kept whole, surname included.
+local function myRealm()
+    local r = GetNormalizedRealmName and GetNormalizedRealmName()
+    if not r or r == "" then r = (GetRealmName and GetRealmName() or ""):gsub("[%s%-]", "") end
+    return r
+end
+ns.MyRealm = myRealm
+
 function ns.FullName(name, realm)
-    if not name or name == "" then return nil end
-    if name:find("-", 1, true) then return name end
-    if realm and realm ~= "" then return name .. "-" .. realm:gsub("%s", "") end
-    local myRealm = GetNormalizedRealmName and GetNormalizedRealmName() or GetRealmName():gsub("%s", "")
-    return name .. "-" .. myRealm
+    if type(name) ~= "string" or name == "" then return nil end
+    local n, r = name:match("^(.-)%-([^%-]+)$")
+    if not n then n, r = name, realm end
+    n = strtrim(n)
+    if n == "" then return nil end
+    local mine = myRealm()
+    if not r or r == "" then
+        r = mine
+    else
+        r = r:gsub("%s", "")
+        if mine ~= "" and r:lower() == mine:lower() then r = mine end
+    end
+    return n .. "-" .. r
+end
+
+-- The name to whisper or invite, written the way a player would type it:
+-- same-realm players without a realm ("Screwston Eventhorizon"), others with it.
+function ns.SendTarget(full)
+    if type(full) ~= "string" then return full end
+    local n, r = full:match("^(.-)%-([^%-]+)$")
+    if n and r:lower() == myRealm():lower() then return n end
+    return full
+end
+
+-- Names the server has actually stamped on my own messages (learned at login, see Comm.lua).
+ns.myAliases = {}
+
+function ns.IsMe(name)
+    if type(name) ~= "string" then return false end
+    local me = ns.Me()
+    if me and name:lower() == me:lower() then return true end
+    return ns.myAliases[name:lower()] == true
 end
 
 function ns.UnitFullName(unit)
@@ -118,6 +155,18 @@ function ns.Clamp(v, lo, hi, default)
     return math.max(lo, math.min(hi, math.floor(v)))
 end
 
+-- Alert sounds respect the player's setting (/moo sound on|off).
+function ns.Alert(sound, fallback)
+    if MOO_DB and MOO_DB.sound == false then return end
+    PlaySound(sound or fallback)
+end
+
+function ns.SetSound(on)
+    MOO_DB.sound = on and true or false
+    ns.Print(on and "Alert sounds on." or "Alert sounds off. Chat messages still tell you about new applicants.")
+    ns.Fire("STATE_CHANGED")
+end
+
 function ns.ClassColor(classFile, text)
     local c = classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile]
     if c and c.colorStr then return "|c" .. c.colorStr .. text .. "|r" end
@@ -181,6 +230,7 @@ local DB_DEFAULTS = {
     seenInstances = {}, -- [mapID] = { name, type, last } every instance visited
     minimap  = { angle = 200, hide = false },
     theme    = "classic",   -- or "dark"
+    sound    = true,        -- alert sounds (new applicant, recruit request)
 }
 
 local CHAR_DEFAULTS = {
@@ -377,8 +427,44 @@ COMMANDS.instances = function(rest)
     end
 end
 COMMANDS.status = function() ns.PrintStatus() end
+-- Self-test: see and apply to your own listing, so one person can check that MOO's
+-- messages really go out and come back. Session only: /reload turns it off.
+COMMANDS.selftest = function(rest)
+    local v = (rest or ""):lower()
+    if v == "on" then
+        ns.selfTest = true
+        ns.Print("Self-test ON: your own listings show up and you can apply to them. " ..
+            "List a group, wait a few seconds, then apply to it from the same tab. /moo selftest off or /reload ends it.")
+    elseif v == "off" then
+        ns.selfTest = false
+        for leader in pairs(ns.listings or {}) do
+            if ns.IsMe(leader) then ns.listings[leader] = nil end
+        end
+        ns.Print("Self-test off.")
+    else
+        ns.Print("Self-test is " .. (ns.selfTest and "on" or "off") .. ". Use /moo selftest on | off")
+    end
+    ns.Fire("LISTINGS_UPDATED")
+end
+COMMANDS.names = function()
+    local n, r = UnitName("player")
+    ns.Print("UnitName: [" .. tostring(n) .. "] realm: [" .. tostring(r) .. "]")
+    ns.Print("GetRealmName: [" .. tostring(GetRealmName and GetRealmName()) .. "]  normalized: [" ..
+        tostring(GetNormalizedRealmName and GetNormalizedRealmName()) .. "]")
+    ns.Print("MOO thinks you are: [" .. tostring(ns.Me()) .. "]  and whispers you as: [" .. tostring(ns.SendTarget(ns.Me())) .. "]")
+    ns.Print("The server stamps your messages as: [" .. tostring(ns.myStamped or "not learned yet") .. "]")
+    ns.Print("Senders seen on MOO messages: " .. (ns.lastSenders and #ns.lastSenders > 0 and
+        ("[" .. table.concat(ns.lastSenders, "] [") .. "]") or "none yet (list a group, then try again)"))
+end
+COMMANDS.sound = function(rest)
+    local v = (rest or ""):lower()
+    if v == "on" then ns.SetSound(true)
+    elseif v == "off" then ns.SetSound(false)
+    else ns.SetSound(MOO_DB.sound == false) end   -- no word: toggle
+end
 COMMANDS.theme = function(rest) ns.SetTheme((rest or ""):lower()) end
-COMMANDS.feedback = function() ns.ToggleMain(7) end
+COMMANDS.coach = function() ns.ToggleMain(7) end
+COMMANDS.feedback = function() ns.ToggleMain(8) end
 COMMANDS.recruit = function(rest) ns.RecruitCommand(rest) end
 COMMANDS.bug = function() ns.ShowCopyBox("MOO bug report: copy and paste this into your report", ns.BugReport()) end
 COMMANDS.minimap = function() ns.SetMinimapButtonShown(MOO_DB.minimap.hide) end
@@ -402,8 +488,8 @@ COMMANDS.suggestions = function(rest)
 end
 COMMANDS.help = function()
     ns.Print("/mooo or /moo open: open the window. Plain /moo (or /moo Name) still moos.")
-    ns.Print("/moo optin | optout | role tank|heal|dps | rc | rate | who Name | feedback | guide <topic> | suggestions on|off | minimap")
-    ns.Print("/moo key <secret> | instance [link KEY | forget | keys] | instances [export] | status | bug | theme dark|classic")
+    ns.Print("/moo optin | optout | role tank|heal|dps | rc | rate | who Name | coach | feedback | guide <topic> | suggestions on|off | minimap")
+    ns.Print("/moo key <secret> | instance [link KEY | forget | keys] | instances [export] | status | bug | theme dark|classic | sound on|off | names | selftest on|off")
     if ns.IsRecruitOwner and ns.IsRecruitOwner() then
         ns.Print("/moo recruit on | off | link <link> | message <text> | send Name | list  (answer tester whispers)")
     end
@@ -591,11 +677,9 @@ function ns.BugReport()
         "   Available players: ", ns.available and #(ns.SortedAvailable()) or 0,
         "   My listing: ", ns.myListing and ns.myListing.inst or "none",
         "   Applicants: ", ns.applicants and #(ns.SortedApplicants()) or 0)
-    local db = ns.RealmData()
-    local nR, nA = 0, 0
-    for _ in pairs(db.ratings) do nR = nR + 1 end
-    for _ in pairs(db.attest) do nA = nA + 1 end
-    add("Stored ratings: ", nR, "   Stored runs: ", nA, "   Pending rating windows: ",
+    local function count(t) local n = 0 for _ in pairs(t or {}) do n = n + 1 end return n end
+    add("Ratings about me: ", count(MOO_CharDB and MOO_CharDB.aboutMe), "   Ratings I gave: ", count(MOO_CharDB and MOO_CharDB.given),
+        "   Waiting to deliver: ", count(MOO_CharDB and MOO_CharDB.outbox), "   Pending rating windows: ",
         MOO_CharDB and MOO_CharDB.pending and #MOO_CharDB.pending or 0)
     if MOO_CharDB and MOO_CharDB.activeRun then
         add("Active run: ", MOO_CharDB.activeRun.inst, " (map ", MOO_CharDB.activeRun.mapID, ")")

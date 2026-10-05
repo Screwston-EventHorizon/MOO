@@ -21,8 +21,8 @@ Note: the Forever beta sometimes forgets addon data at login, so ratings may res
 - [ ] Hovering a name shows their guild
 
 ## Group finder (2+ people)
-- [ ] List a group; it shows for others with Tank / Healer / DPS needs and "Group ratings"
-- [ ] Hover a listing: every member and their rating; click it: the group card
+- [ ] List a group; it shows for others with Tank / Healer / DPS needs and how many players are in it
+- [ ] Hover a listing: every member and their role; click it: the group card (no ratings shown)
 - [ ] Apply; the leader hears a sound and sees you in My Group with gear and stats
 - [ ] Invite, Decline and Cancel all work; your button updates
 - [ ] World PvP listings show no ratings anywhere
@@ -35,7 +35,9 @@ Note: the Forever beta sometimes forgets addon data at login, so ratings may res
 ## Ratings and feedback (3+ people)
 - [ ] Run a dungeon for 5+ minutes, leave, and stay out 90 seconds: the rating window appears
 - [ ] Give stars, compliments and a private tip
-- [ ] A rated player's score appears once 3 different players have rated them in that role
+- [ ] Your Ratings tab shows a role's score once 3 different players have rated you in it
+- [ ] When you apply, the leader sees your score on My Group; when you join, the group sees it too
+- [ ] Rate someone who is offline: it arrives when they come back online (within ~10 minutes)
 - [ ] Feedback tab: tips and "How to" guides open; private tips show once 2 players sent some
 - [ ] Gear changes from "self-reported" to "verified" when you stand near a new groupmate
 
@@ -46,6 +48,10 @@ Note: the Forever beta sometimes forgets addon data at login, so ratings may res
 - [ ] `/moo key <secret>` seals the channel; guildmates get the key automatically
 - [ ] Officers of another guild set the same secret: you still see each other
 - [ ] `/moo key clear` goes back to the open channel
+
+## Feedback
+- [ ] Feedback tab: pick a type, write something, Send. It says "Sent" and shows "delivered" once the author has it
+- [ ] (Author) the Feedback tab shows the inbox; click a row to read it, "Copy all" to export
 
 ## Instances
 - [ ] In each dungeon you visit, `/moo instance` shows its ID; at the end, post `/moo instances export`

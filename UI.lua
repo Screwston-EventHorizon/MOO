@@ -452,8 +452,8 @@ local function GroupPage(parent, cats, title)
     lt:SetPoint("TOPLEFT", 4, -88)
     local hdr = CreateFrame("Frame", nil, p)
     hdr:SetPoint("TOPLEFT", 4, -106); hdr:SetPoint("RIGHT", -4, 0); hdr:SetHeight(14)
-    local X = { 0, 130, 300, 450, 575 }
-    Header(hdr, { { "Leader", X[1] }, { "Where", X[2] }, { "Needs", X[3] }, { "Group ratings", X[4] }, { "Note", X[5] } })
+    local X = { 0, 130, 300, 450, 520 }
+    Header(hdr, { { "Leader", X[1] }, { "Where", X[2] }, { "Needs", X[3] }, { "Group", X[4] }, { "Note", X[5] } })
 
     p.list = List(p, 24, 14,
         function(r)
@@ -463,7 +463,7 @@ local function GroupPage(parent, cats, title)
                 r.c[i]:SetPoint("LEFT", X[i] + 2, 0)
             end
             r.c[2]:SetWidth(165)
-            r.c[5]:SetWidth(76)
+            r.c[5]:SetWidth(130)
             r.btn = Button(r, "Apply", 64, 20)
             r.btn:SetPoint("RIGHT", -2, 0)
             r:SetScript("OnClick", function(self) if self.item then ns.ShowGroup(self.item.leader) end end)
@@ -477,9 +477,8 @@ local function GroupPage(parent, cats, title)
                 GameTooltip:AddLine("Min level " .. l.min, 0.7, 0.7, 0.7)
                 GameTooltip:AddLine(" ")
                 for _, m in ipairs(ns.ListingMembers(l)) do
-                    local right = noRatings(l.cat) and "" or ns.RatingSummary(m.name, m.role)
-                    GameTooltip:AddDoubleLine(ns.ClassColor(m.class, ns.ShortName(m.name)) .. ns.GuildMark(m.name) ..
-                        (m.role and ("  " .. ns.RoleText(m.role)) or ""), right)
+                    GameTooltip:AddLine(ns.ClassColor(m.class, ns.ShortName(m.name)) .. ns.GuildMark(m.name) ..
+                        (m.role and ("  " .. ns.RoleText(m.role)) or ""))
                 end
                 GameTooltip:AddLine("Click to see the whole group.", 0.5, 0.5, 0.5)
                 GameTooltip:Show()
@@ -490,7 +489,8 @@ local function GroupPage(parent, cats, title)
             r.c[1]:SetText(nameText(l.leader, l.class, l.lvl))
             r.c[2]:SetText(ns.InstanceName(l.inst))
             r.c[3]:SetText(ns.NeedsText(l))
-            r.c[4]:SetText(noRatings(l.cat) and "|cff888888-|r" or ns.GroupRatingSummary(l))
+            local n = #ns.ListingMembers(l)
+            r.c[4]:SetText("|cffaaaaaa" .. n .. (n == 1 and " player" or " players") .. "|r")
             r.c[5]:SetText(l.note)
             local app = ns.myApplications[l.leader]
             r.btn:Enable()
@@ -612,27 +612,15 @@ local function PlayersPage(parent)
 
     local hdr = CreateFrame("Frame", nil, p)
     hdr:SetPoint("TOPLEFT", 4, -108); hdr:SetPoint("RIGHT", -4, 0); hdr:SetHeight(14)
-    local X = { 0, 135, 305, 410, 510 }
-    Header(hdr, { { "Player", X[1] }, { "Wants", X[2] }, { "Roles", X[3] }, { "Rating", X[4] }, { "Note", X[5] } })
-
-    local function bestRating(a)
-        if noRatings(a.cat) then return "|cff888888-|r" end
-        local best, bestRole
-        local prof = ns.GetProfile(a.name)
-        for _, r in ipairs(a.roles) do
-            local pr = prof.roles[r]
-            if pr and pr.shown and (not best or pr.avg > best) then best, bestRole = pr.avg, r end
-        end
-        if bestRole then return ns.RatingSummary(a.name, bestRole) .. (#a.roles > 1 and (" " .. ns.ROLE_LABEL[bestRole]:sub(1, 1)) or "") end
-        return ns.RatingSummary(a.name, a.roles[1])
-    end
+    local X = { 0, 135, 305, 410, 600 }
+    Header(hdr, { { "Player", X[1] }, { "Wants", X[2] }, { "Roles", X[3] }, { "Note", X[4] } })
 
     p.list = List(p, 24, 14,
         function(r)
             r.c = {}
             for i = 1, 5 do r.c[i] = Text(r); r.c[i]:SetPoint("LEFT", X[i] + 2, 0) end
             r.c[2]:SetWidth(165)
-            r.c[5]:SetWidth(90)
+            r.c[4]:SetWidth(180)
             r.inv = Button(r, "Invite", 60, 20)
             r.inv:SetPoint("RIGHT", -2, 0)
             r.gear = Button(r, "Gear", 50, 20)
@@ -650,12 +638,6 @@ local function PlayersPage(parent)
                     GameTooltip:AddLine("Wants:", 1, 0.82, 0)
                     for _, k in ipairs(a.insts) do GameTooltip:AddLine("  " .. ns.InstanceName(k), 1, 1, 1) end
                 end
-                if not noRatings(a.cat) then
-                    GameTooltip:AddLine("Ratings:", 1, 0.82, 0)
-                    for _, ro in ipairs(a.roles) do
-                        GameTooltip:AddDoubleLine("  " .. ns.RoleText(ro), ns.RatingSummary(a.name, ro))
-                    end
-                end
                 if a.note ~= "" then GameTooltip:AddLine(a.note, 0.8, 0.8, 0.8, true) end
                 GameTooltip:Show()
             end)
@@ -665,8 +647,8 @@ local function PlayersPage(parent)
             r.c[1]:SetText(nameText(a.name, a.class, a.lvl))
             r.c[2]:SetText(ns.AvailableWhereText(a.cat, a.insts))
             r.c[3]:SetText(ns.RolesText(a.roles))
-            r.c[4]:SetText(bestRating(a))
-            r.c[5]:SetText(a.note)
+            r.c[4]:SetText(a.note)
+            r.c[5]:SetText("")
             r.inv:SetScript("OnClick", function() ns.InviteName(a.name) end)
             r.gear:SetScript("OnClick", function()
                 if not ns.myListing then
@@ -707,6 +689,15 @@ local function MyGroupPage(parent)
 
     local hdr = CreateFrame("Frame", nil, p)
     hdr:SetPoint("TOPLEFT", 4, -28); hdr:SetPoint("RIGHT", -4, 0); hdr:SetHeight(14)
+    p.sound = Button(p, "", 120, 18, function() ns.SetSound(MOO_DB.sound == false) end)
+    p.sound:SetPoint("TOPRIGHT", -4, -26)
+    p.sound:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Alert sound")
+        GameTooltip:AddLine("Plays when someone applies to your group (and for recruit requests).", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    p.sound:SetScript("OnLeave", GameTooltip_Hide)
     local X = { 0, 140, 200, 240, 330, 440 }
     Header(hdr, { { "Applicant", X[1] }, { "Role", X[2] }, { "iLvl", X[3] }, { "Rating", X[4] }, { "Gear", X[5] }, { "Note", X[6] } })
 
@@ -796,6 +787,7 @@ local function MyGroupPage(parent)
             self.status:SetText("You have no listing. List a group from Dungeons, Raids or PvP.")
             self.t:Hide(); self.h:Hide(); self.d:Hide()
         end
+        self.sound:SetText(MOO_DB.sound == false and "Alert sound: Off" or "Alert sound: On")
         self.apps:SetData(ns.SortedApplicants(), l and "No applicants yet." or "")
         local roster = ns.GroupRoster()
         local c = ns.RoleCounts(roster)
@@ -814,6 +806,9 @@ end
 -- Ratings page
 ------------------------------------------------------------------------
 function ns.ProfileText(name)
+    if not ns.IsMe(name) and not (ns.summaries and ns.summaries[name]) then
+        return "|cff888888Ratings are only shared when a player applies to your group or joins it.|r"
+    end
     local p = ns.GetProfile(name)
     local lines = {}
     local any = false
@@ -837,7 +832,7 @@ function ns.ProfileText(name)
     for instKey, roles in pairs(p.inst) do
         for role, pi in pairs(roles) do
             local pr = p.roles[role]
-            if pr and pr.shown then
+            if pr and pr.shown and (pi.nRaters or 0) >= ns.MIN_RATERS then
                 table.insert(instLines, string.format("  %s (%s): %s |cff888888x%d|r",
                     ns.InstanceName(instKey), ns.ROLE_LABEL[role], ns.StarsText(pi.avg), pi.count))
             end
@@ -854,26 +849,10 @@ end
 local function RatingsPage(parent)
     local p = CreateFrame("Frame", nil, parent)
     p:SetAllPoints()
-    local s = Section(p, "Look up a player")
-    s:SetPoint("TOPLEFT", 4, -4)
-    p.search = EditBox(p, 200, 40)
-    p.search:SetPoint("TOPLEFT", 10, -24)
-    local go = Button(p, "Show", 70, 22, function()
-        local n = strtrim(p.search:GetText() or "")
-        if n ~= "" then ns.ShowProfile(ns.FullName(n:sub(1, 1):upper() .. n:sub(2))) end
-    end)
-    go:SetPoint("LEFT", p.search, "RIGHT", 6, 0)
-    p.search:SetScript("OnEnterPressed", function(self) self:ClearFocus(); go:Click() end)
-    local tgt = Button(p, "My target", 90, 22, function()
-        local n = UnitIsPlayer("target") and ns.UnitFullName("target")
-        if n then ns.ShowProfile(n) else ns.Print("Target a player first.") end
-    end)
-    tgt:SetPoint("LEFT", go, "RIGHT", 4, 0)
-
     local mine = Section(p, "Your ratings")
-    mine:SetPoint("TOPLEFT", 4, -60)
+    mine:SetPoint("TOPLEFT", 4, -4)
     p.mine = Text(p, "GameFontHighlight")
-    p.mine:SetPoint("TOPLEFT", 10, -82)
+    p.mine:SetPoint("TOPLEFT", 10, -28)
     p.mine:SetPoint("RIGHT", -10, 0)
     p.mine:SetWordWrap(true)
     p.mine:SetJustifyV("TOP")
@@ -883,9 +862,9 @@ local function RatingsPage(parent)
     how:SetPoint("BOTTOMLEFT", 6, 4)
     how:SetPoint("RIGHT", -6, 0)
     how:SetWordWrap(true)
-    how:SetText("Ratings count only between players who were in the same dungeon or raid group and both have MOO. " ..
-        "The role comes from the rated player. Scores show after " .. ns.MIN_RATERS ..
-        " different players rate a role. Ratings older than 180 days drop off.")
+    how:SetText("Ratings are kept by the player they're about, and only shared when they apply to a group " ..
+        "(with the leader) or join one (with the group). Only players who were in the run with you can rate you. " ..
+        "A role's score shows after " .. ns.MIN_RATERS .. " different players rate it. Ratings older than 180 days drop off.")
 
     function p:Refresh()
         self.mine:SetText(ns.ProfileText(ns.Me()))
@@ -1218,29 +1197,23 @@ local function makeGroupFrame()
     f.sub:SetPoint("RIGHT", -14, 0)
     f.sub:SetWordWrap(true)
 
-    local X = { 0, 150, 220, 330 }
+    local X = { 0, 200, 300, 400 }
     local hdr = CreateFrame("Frame", nil, f)
     hdr:SetPoint("TOPLEFT", 14, -62); hdr:SetPoint("RIGHT", -14, 0); hdr:SetHeight(14)
-    Header(hdr, { { "Member", X[1] }, { "Role", X[2] }, { "Rating", X[3] }, { "Known for", X[4] } })
+    Header(hdr, { { "Member", X[1] }, { "Role", X[2] } })
 
     f.list = List(f, 20, 13,
         function(r)
             r.c = {}
             for i = 1, 4 do r.c[i] = Text(r); r.c[i]:SetPoint("LEFT", X[i] + 2, 0) end
             r.c[4]:SetWidth(140)
-            r:SetScript("OnClick", function(self) if self.item then ns.ShowProfile(self.item.name) end end)
         end,
         function(r, m)
             local leader = groupFrame.listing and m.name == groupFrame.listing.leader
             r.c[1]:SetText(ns.ClassColor(m.class, ns.ShortName(m.name)) .. ns.GuildMark(m.name) ..
                 (leader and " |cffffd100(leader)|r" or ""))
             r.c[2]:SetText(m.role and ns.RoleText(m.role) or "|cff888888?|r")
-            if groupFrame.noRatings then
-                r.c[3]:SetText("|cff888888-|r"); r.c[4]:SetText("")
-            else
-                r.c[3]:SetText(ns.RatingSummary(m.name, m.role))
-                r.c[4]:SetText("|cffaaaaaa" .. ns.TopTags(ns.GetProfile(m.name), 2) .. "|r")
-            end
+            r.c[3]:SetText(""); r.c[4]:SetText("")
         end)
     f.list:SetPoint("TOPLEFT", 14, -78)
     f.list:SetPoint("RIGHT", -14, 0)
@@ -1249,7 +1222,7 @@ local function makeGroupFrame()
     f.apply:SetPoint("BOTTOMRIGHT", -14, 12)
     f.hint = Text(f, "GameFontDisableSmall")
     f.hint:SetPoint("BOTTOMLEFT", 14, 16)
-    f.hint:SetText("Click a member for their full ratings and gear.")
+    f.hint:SetText("Apply to share your rating and gear with the leader.")
     ns.Themed(f)
     f:Hide()
     groupFrame = f
@@ -1271,7 +1244,7 @@ function ns.RefreshGroupFrame()
     f.noRatings = (l.cat == "WPVP")
     f.title:SetText(ns.ShortName(l.leader) .. "'s group - " .. ns.InstanceName(l.inst))
     f.sub:SetText("Needs: " .. ns.NeedsText(l) .. (l.note ~= "" and ("   |cffffffff" .. l.note .. "|r") or "") ..
-        (f.noRatings and "\n|cff888888World PvP groups aren't rated.|r" or ("\nGroup: " .. ns.GroupRatingSummary(l))))
+        "\n|cff888888Ratings are shared once you apply or join.|r")
     local members = ns.ListingMembers(l)
     f.list:SetData(members, "")
     local app = ns.myApplications[l.leader]

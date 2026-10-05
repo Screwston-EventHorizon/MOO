@@ -102,9 +102,17 @@ ns.InRestrictedInstance = inRestrictedInstance
 -- notes, and the names of instances MOO added) go through Blizzard's *logged* addon
 -- message API, so the server keeps them and players can report abuse under the Code
 -- of Conduct, as Blizzard asks of addons that send user-generated content.
-local LOGGED_KINDS = { L = true, W = true, J = true }
+local LOGGED_KINDS = { L = true, W = true, J = true, FB = true }
+
+-- Whisper targets MOO used in the last few seconds, so the game's
+-- "No player named ... is currently playing" for them can be hidden.
+local recentTargets = {}
 
 local function rawSend(dist, msg, target)
+    if dist == "WHISPER" then
+        target = ns.SendTarget(target)
+        if target then recentTargets[target:lower()] = GetTime() end
+    end
     if dist == "CHANNEL" then
         local idx = channelIndex()
         if idx == 0 then return end
@@ -195,8 +203,17 @@ end
 local function onAddonMessage(prefix, msg, dist, sender, logged)
     if prefix ~= ns.PREFIX or not sender then return end
     if ns.IsSecret(msg) or ns.IsSecret(sender) then return end
+    ns.lastSenders = ns.lastSenders or {}
+    if #ns.lastSenders < 5 and not tContains(ns.lastSenders, sender) then table.insert(ns.lastSenders, sender) end
     sender = ns.FullName(sender)
-    if sender == ns.Me() then return end
+    -- my own login probe coming back: remember exactly how the server writes my name
+    if ns.myProbe and msg == "ME^" .. ns.myProbe then
+        ns.myAliases[sender:lower()] = true
+        ns.myStamped = sender
+        return
+    end
+    if ns.IsMe(sender) and not ns.selfTest then return end
+    ns.Fire("SEEN", sender)
     if not ns.InOlympus() then return end
     if #msg > 255 then return end
     -- the same NET message arrives twice for guildmates (guild + channel)
@@ -229,6 +246,96 @@ ns.Listen("READY", function()
     ns.JoinChannel()
 end)
 
+ns.Listen("READY", function()
+    -- one guild message to myself, to learn how the server stamps my name
+    if IsInGuild() then
+        ns.myProbe = ns.Hash(tostring(GetTime()) .. tostring(math.random()))
+        ns.Send("GUILD", { "ME", ns.myProbe }, nil, true)
+    end
+end)
+
 ns.On("CHANNEL_UI_UPDATE", function()
     if channelName then hideChannelFromChat() end
 end)
+
+------------------------------------------------------------------------
+-- Hide "player not found" for MOO's own background whispers
+------------------------------------------------------------------------
+local notFoundPattern
+local function systemFilter(_, _, msg, ...)
+    if type(msg) ~= "string" or ns.IsSecret(msg) then return false end
+    if not notFoundPattern then
+        local fmt = ERR_CHAT_PLAYER_NOT_FOUND_S or "No player named '%s' is currently playing."
+        notFoundPattern = "^" .. fmt:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1"):gsub("%%%%s", "(.+)") .. "$"
+    end
+    local who = msg:match(notFoundPattern)
+    if who then
+        local t = recentTargets[who:lower()]
+        if t and GetTime() - t < 10 then return true end
+    end
+    return false
+end
+
+ns.Listen("READY", function()
+    if ChatFrame_AddMessageEventFilter then
+        ChatFrame_AddMessageEventFilter("CHAT_MSG_SYSTEM", systemFilter)
+    elseif ChatFrameUtil and ChatFrameUtil.AddMessageEventFilter then
+        ChatFrameUtil.AddMessageEventFilter("CHAT_MSG_SYSTEM", systemFilter)
+    end
+end)
+
+------------------------------------------------------------------------
+-- Outbox: whispers that must arrive (ratings, private tips).
+-- Each carries an id; the receiver's MOO answers "AK" with it. Until then MOO resends
+-- every 10 minutes, or right away when it hears from that player, for up to 7 days.
+------------------------------------------------------------------------
+local RESEND_SECONDS, KEEP_SECONDS, MAX_TRIES = 600, 7 * 86400, 60
+
+local function outbox()
+    MOO_CharDB.outbox = MOO_CharDB.outbox or {}
+    return MOO_CharDB.outbox
+end
+
+local function trySend(id, e)
+    if inRestrictedInstance() then return end
+    e.last = ns.Now()
+    e.tries = (e.tries or 0) + 1
+    local fields = { e.kind, id }
+    for _, v in ipairs(e.fields) do table.insert(fields, v) end
+    ns.Send("WHISPER", fields, e.to)
+end
+
+function ns.Deliver(kind, to, fields)
+    to = ns.FullName(to) or to             -- one spelling, so the receiver's "AK" matches
+    local id = ns.Hash(kind .. "|" .. to .. "|" .. table.concat(fields, "|") .. "|" .. ns.Now()):sub(1, 8)
+    local e = { kind = kind, to = to, fields = fields, created = ns.Now(), last = 0, tries = 0 }
+    outbox()[id] = e
+    trySend(id, e)
+end
+
+function ns.Ack(to, id)
+    if type(id) == "string" and #id <= 12 then ns.Send("WHISPER", { "AK", id }, to) end
+end
+
+ns.Handle("AK", function(sender, f, dist)
+    if dist ~= "WHISPER" then return end
+    local e = outbox()[f[2]]
+    if e and ns.LooseSame and ns.LooseSame(e.to, sender) then outbox()[f[2]] = nil end
+end)
+
+local function retry(onlyFor)
+    local now, sent = ns.Now(), 0
+    for id, e in pairs(outbox()) do
+        if now - e.created > KEEP_SECONDS or e.tries >= MAX_TRIES then
+            outbox()[id] = nil
+        elseif onlyFor then
+            if ns.LooseSame(e.to, onlyFor) and now - e.last >= 15 then trySend(id, e) end
+        elseif now - e.last >= RESEND_SECONDS and sent < 5 then
+            trySend(id, e); sent = sent + 1
+        end
+    end
+end
+
+-- Heard from someone: they're online, so deliver anything waiting for them.
+ns.Listen("SEEN", function(name) retry(name) end)
+ns.Listen("READY", function() C_Timer.NewTicker(60, function() retry(nil) end) end)

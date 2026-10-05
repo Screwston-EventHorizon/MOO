@@ -198,28 +198,20 @@ end
 function ns.SendSuggestions(runId, ratee, mask)
     mask = math.floor(tonumber(mask) or 0)
     if mask <= 0 or not ns.IsOptedIn() then return end
-    ns.Send("WHISPER", { "S", runId, mask }, ratee)
-end
-
-local function myRun(runId)
-    for _, r in ipairs(MOO_CharDB.runs or {}) do
-        if r.id == runId then return r end
-    end
-    local a = MOO_CharDB.activeRun
-    if a and a.id == runId then
-        local names = {}
-        for n in pairs(a.roster or {}) do names[n] = true end
-        return { id = a.id, inst = a.inst, role = MOO_CharDB.role, roster = names }
-    end
+    ns.Deliver("S", ratee, { runId, string.format("%d", mask) })      -- resent until it arrives
 end
 
 ns.Handle("S", function(sender, f, dist)
     if dist ~= "WHISPER" then return end
+    ns.Ack(sender, f[2])                                          -- stop their retries either way
     if not ns.IsOptedIn() or MOO_CharDB.suggestionsOff then return end
-    local runId, mask = f[2], ns.Clamp(f[3], 0, 2 ^ 11 - 1, 0)   -- 11 suggestion bits exist
+    local runId, mask = f[3], ns.Clamp(f[4], 0, 2 ^ 11 - 1, 0)   -- 11 suggestion bits exist
     if type(runId) ~= "string" or #runId > 12 or mask <= 0 then return end
-    local r = myRun(runId)
-    if not r or not r.roster[sender] then return end   -- only from people who were in that run
+    local r = ns.MyRun(runId)
+    if not r then return end
+    local inRun = false
+    for n in pairs(r.roster or {}) do if ns.LooseSame(n, sender) then inRun = true break end end
+    if not inRun then return end                                  -- only from people who were in that run
     MOO_CharDB.suggestions = MOO_CharDB.suggestions or {}
     local from = ns.Hash("from:" .. sender)            -- never store who sent it, only a hash to count
     for _, e in ipairs(MOO_CharDB.suggestions) do

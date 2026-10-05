@@ -75,7 +75,7 @@ local function showNext()
     popup.quote:SetText("\"" .. item.text .. "\"")
     popup.send:SetText(sent and "Send again" or "Send download info")
     popup:Show()
-    PlaySound(SOUNDKIT and SOUNDKIT.TELL_MESSAGE or 3081)
+    ns.Alert(SOUNDKIT and SOUNDKIT.TELL_MESSAGE, 3081)
 end
 
 local function makePopup()
@@ -126,7 +126,7 @@ function ns.SendRecruitReply(name)
         return
     end
     local send = (C_ChatInfo and C_ChatInfo.SendChatMessage) or SendChatMessage
-    send(replyText(), "WHISPER", nil, name)
+    send(replyText(), "WHISPER", nil, ns.SendTarget(name))
     c.people[name] = c.people[name] or {}
     c.people[name].sent = ns.Now()
     ns.Print("Sent MOO download info to " .. ns.ShortName(name) .. ".")

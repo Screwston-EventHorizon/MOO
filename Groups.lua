@@ -159,7 +159,7 @@ ns.Handle("LM", function(sender, f)
     for entry in list:gmatch("[^,]+") do
         if #lm.list >= MAX_MEMBERS then break end
         local name, role, class = strsplit(":", entry)
-        name = ns.SafeName(name)
+        name = ns.SafeName(name) and ns.FullName(name)
         if name and not lm.seen[name] then
             lm.seen[name] = true
             table.insert(lm.list, { name = name, role = ns.ValidRole(role), class = ns.ValidClass(class) })
@@ -181,24 +181,6 @@ function ns.ListingMembers(l)
     local lm = ns.listingMembers[l.leader]
     if lm and lm.id == l.id and #lm.list > 0 then return lm.list end
     return { { name = l.leader, class = l.class } }
-end
-
--- "4.3* avg, 3 of 4 rated" over the members' ratings for the role each plays.
-function ns.GroupRatingSummary(l)
-    local members = ns.ListingMembers(l)
-    local sum, rated = 0, 0
-    for _, m in ipairs(members) do
-        local prof = ns.GetProfile(m.name)
-        local pr = m.role and prof.roles[m.role]
-        if not pr then
-            for _, r in pairs(prof.roles) do if not pr or r.count > pr.count then pr = r end end
-        end
-        if pr and pr.shown then sum, rated = sum + pr.avg, rated + 1 end
-    end
-    if rated == 0 then
-        return "|cff888888none yet (" .. #members .. (#members == 1 and " player" or " players") .. ")|r"
-    end
-    return ns.StarsText(sum / rated) .. " |cff888888" .. rated .. " of " .. #members .. " rated|r"
 end
 
 ns.Handle("X", function(sender, f)
@@ -343,6 +325,7 @@ function ns.Apply(leader, role, note)
     role = role or MOO_CharDB.role
     ns.Send("WHISPER", { "J", l.id, role, myLevel(), myClass(), ns.AverageItemLevel(), ns.Clean(note, 60) }, leader)
     ns.SendGearTo(leader, l.id)
+    ns.SendRatingSummaryTo(leader, l.id)
     ns.myApplications[leader] = { id = l.id, role = role, state = "sent", ts = ns.Now() }
     ns.Print("Applied to " .. ns.ShortName(leader) .. "'s " .. ns.InstanceName(l.inst) .. " group as " .. ns.ROLE_LABEL[role] .. ".")
     ns.Fire("LISTINGS_UPDATED")
@@ -375,7 +358,7 @@ ns.Handle("J", function(sender, f, dist)
     -- one sound and chat line per applicant per 30 s, so re-sending can't spam you
     if not lastApplyAlert[sender] or GetTime() - lastApplyAlert[sender] > 30 then
         lastApplyAlert[sender] = GetTime()
-        PlaySound(SOUNDKIT and SOUNDKIT.IG_PLAYER_INVITE or 880)
+        ns.Alert(SOUNDKIT and SOUNDKIT.IG_PLAYER_INVITE, 880)
         ns.Print(ns.ClassColor(class, ns.ShortName(sender)) .. " wants to join as " .. ns.RoleText(role) ..
             ". Type /mooo, My Group.")
     end
@@ -412,10 +395,11 @@ end)
 -- Leader actions (all from button clicks)
 ------------------------------------------------------------------------
 function ns.InviteName(name)
+    local target = ns.SendTarget(name)
     if C_PartyInfo and C_PartyInfo.InviteUnit then
-        C_PartyInfo.InviteUnit(name)
+        C_PartyInfo.InviteUnit(target)
     elseif InviteUnit then
-        InviteUnit(name)
+        InviteUnit(target)
     end
 end
 
