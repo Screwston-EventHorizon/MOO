@@ -68,11 +68,14 @@ ns.On("READY_CHECK_FINISHED", function()
     ns.Fire("READY_CHECK_UPDATED")
 end)
 
--- Role of a group member: what their MOO told us, else the game's assigned role.
+-- Role of a group member: what their MOO told us, else the role the leader set on
+-- Olympus's Board (with Olympus), else the game's assigned role.
 function ns.MemberRole(name, unit)
     local gi = ns.groupInfo[name]
     if gi and ns.ROLE_LABEL[gi.role] then return gi.role end
     if name == ns.Me() then return MOO_CharDB.role end
+    local board = ns.Olympus and ns.Olympus.MemberRole(name)
+    if board then return board end
     if unit and UnitGroupRolesAssigned then
         local r = UnitGroupRolesAssigned(unit)
         if r == "TANK" then return "TANK" elseif r == "HEALER" then return "HEAL" elseif r == "DAMAGER" then return "DPS" end

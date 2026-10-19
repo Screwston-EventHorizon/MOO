@@ -278,7 +278,13 @@ function ns.IsOlympusGuildName(guild)
     return true
 end
 
+-- With Olympus's Board (Olympus.lua), MOO lets Olympus say who is a member.
+function ns.WithOlympus()
+    return ns.Olympus ~= nil and ns.Olympus.Integrated()
+end
+
 function ns.InOlympus()
+    if ns.WithOlympus() then return ns.Olympus.IsMember() end
     if not IsInGuild() then return false end
     local guild = GetGuildInfo("player")
     return ns.IsOlympusGuildName(guild)
@@ -373,7 +379,8 @@ ns.On("PLAYER_LOGIN", function()
     C_Timer.After(5, function()
         ns.Fire("READY")
         if ns.InOlympus() then
-            local extra = ns.OlympusAddonLoaded() and "" or " (tip: install the Olympus addon too)"
+            local extra = ns.OlympusAddonLoaded() and (ns.Olympus and ns.Olympus.LoginNote() or "")
+                or " (tip: install the Olympus addon too)"
             ns.Print("v" .. ns.VERSION .. " loaded. Type /mooo to open (plain /moo still moos)." .. extra)
             local _, _, rankIndex = GetGuildInfo("player")
             if ns.CROSS_GUILD and ns.REQUIRE_KEY and not MOO_DB.channelKey and rankIndex and rankIndex <= 1 then
@@ -527,6 +534,7 @@ function ns.PrintStatus()
     ns.Print("Olympus guild: " .. (ns.InOlympus() and "yes" or "no") ..
         "  |  Olympus addon: " .. (ns.OlympusAddonLoaded() and "loaded" or "not loaded"))
     ns.Print("Opted in: " .. (ns.IsOptedIn() and "yes" or "no") .. "  |  Role: " .. MOO_CharDB.role)
+    if ns.Olympus then ns.Print("Olympus link: " .. ns.Olympus.StatusText()) end
     ns.Print("Network channel: " .. (ns.ChannelStatus and ns.ChannelStatus() or "?"))
     if not ns.CROSS_GUILD then
         ns.Print("Cross-guild features are switched off in this build.")
@@ -667,6 +675,10 @@ function ns.BugReport()
     add("Date: ", date("%Y-%m-%d %H:%M"))
     add("Olympus guild: ", ns.InOlympus() and "yes" or "no", "   Officer: ", (ns.AmOfficer and ns.AmOfficer()) and "yes" or "no")
     add("Olympus addon: ", ns.OlympusAddonLoaded() and "loaded" or "not loaded")
+    if ns.Olympus then
+        add("Olympus link: ", ns.Olympus.StatusText())
+        if ns.WithOlympus() then add("Board listings seen: ", ns.Olympus.ListingCount()) end
+    end
     add("Opted in: ", ns.IsOptedIn() and "yes" or "no", "   Role: ", MOO_CharDB and MOO_CharDB.role or "?",
         "   Private tips: ", (MOO_CharDB and MOO_CharDB.suggestionsOff) and "off" or "on")
     add("Cross-guild: ", ns.ChannelStatus and ns.ChannelStatus() or "?")

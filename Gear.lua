@@ -2,7 +2,8 @@
 --
 -- * Your own addon builds the snapshot from your own character (out of combat only)
 --   and sends it ONLY to a group leader you apply to, or one with an open listing
---   who asks while you are listed as available. Never broadcast.
+--   who asks while you are listed as available. Never broadcast. With Olympus's Board:
+--   only to a leader running MOO whose listing Olympus says you applied to.
 -- * Self-reported until checked: once the player is in your group and within inspect
 --   range (~28 yd), MOO inspects them once (out of combat) and marks the snapshot
 --   "verified" or "changed".
@@ -160,14 +161,24 @@ end)
 
 -- A leader with an open listing may ask for my gear while I'm listed as available.
 -- Answered at most once a minute per leader.
+-- With Olympus's Board, a leader's MOO asks after I applied there (f[2]: that listing's id),
+-- and only a leader whose listing Olympus says I applied to gets an answer (Olympus.lua).
 local lastAnswer = {}
-ns.Handle("GR", function(sender)
+
+function ns.AnswerGearRequest(leader, listingId, withRatings)
+    if lastAnswer[leader] and GetTime() - lastAnswer[leader] < 60 then return false end
+    lastAnswer[leader] = GetTime()
+    ns.SendGearTo(leader, listingId)
+    if withRatings then ns.SendRatingSummaryTo(leader, listingId) end
+    return true
+end
+
+ns.Handle("GR", function(sender, f)
     if not ns.IsOptedIn() then return end
+    if ns.WithOlympus() then ns.Olympus.GearAsked(sender, f[2]) return end
     if not ns.myAvailable then return end
     if not (ns.listings and ns.listings[sender]) then return end
-    if lastAnswer[sender] and GetTime() - lastAnswer[sender] < 60 then return end
-    lastAnswer[sender] = GetTime()
-    ns.SendGearTo(sender, "0")
+    ns.AnswerGearRequest(sender, "0")
 end)
 
 function ns.RequestGear(name)

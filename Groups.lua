@@ -5,6 +5,8 @@
 -- * Applying is a whisper (addon message) to the leader only, with your gear and stats.
 -- * Every invite comes from the leader clicking Invite. MOO never invites, accepts,
 --   queues or joins anything by itself.
+-- * With Olympus's Board (Olympus.lua), the listings, flags and applications are Olympus's:
+--   nothing here goes out, and Invite and Decline go through Olympus.
 
 local _, ns = ...
 
@@ -50,7 +52,7 @@ end
 
 local function sendListing()
     local l = ns.myListing
-    if not l then return end
+    if not l or ns.WithOlympus() then return end
     ns.Send("NET", { "L", l.id, l.cat, l.inst, l.t, l.h, l.d, l.min, myLevel(), myClass(), l.note, customName(l.inst) })
     -- the group's members follow in one or more "LM" messages, so everyone can see their ratings
     local chunk, size, seq = {}, 0, 0
@@ -83,6 +85,7 @@ local function resendSoon()
 end
 
 function ns.PostListing(cat, inst, t, h, d, minLvl, note)
+    if ns.WithOlympus() then ns.Olympus.OpenListingDialog(ns.Olympus.KindOfCat(cat)) return end
     if not ns.RequireReady("list a group") then return end
     if IsInGroup() and not UnitIsGroupLeader("player") then
         ns.Print("Only the group leader can list the group.")
@@ -104,7 +107,7 @@ end
 
 function ns.UpdateNeeds(t, h, d)
     local l = ns.myListing
-    if not l then return end
+    if not l or ns.WithOlympus() then return end
     l.t, l.h, l.d = math.max(0, t), math.max(0, h), math.max(0, d)
     sendListing()
     ns.Fire("LISTINGS_UPDATED")
@@ -127,6 +130,7 @@ local function validId(id)
 end
 
 ns.Handle("L", function(sender, f)
+    if ns.WithOlympus() then return end
     local id, cat, inst = f[2], ns.ValidCat(f[3]), f[4]
     if not validId(id) or not cat or not validId(inst) then return end
     learnCustom(inst, f[12])
@@ -147,6 +151,7 @@ ns.listingMembers = {}   -- [leader] = { id=, list = { {name, role, class}, ... 
 local MAX_MEMBERS = 40
 
 ns.Handle("LM", function(sender, f)
+    if ns.WithOlympus() then return end
     local id, seq, list = f[2], ns.Clamp(f[3], 1, 20, nil), f[4]
     if not validId(id) or not seq or not list then return end
     local l = ns.listings[sender]
@@ -212,13 +217,14 @@ end
 
 local function sendAvailable()
     local a = ns.myAvailable
-    if not a then return end
+    if not a or ns.WithOlympus() then return end
     ns.Send("NET", { "W", a.cat, table.concat(a.insts, LIST_SEP), table.concat(a.roles, LIST_SEP),
         myLevel(), myClass(), a.note, customNames(a.insts) })
 end
 
 -- insts: list of instance keys ({"ANY"} = anything in the category); roles: list of roles
 function ns.SetAvailable(cat, insts, roles, note)
+    if ns.WithOlympus() then ns.Print("Raise your flag on Olympus's Board: that's where leaders look.") return end
     if not ns.RequireReady("mark yourself available") then return end
     local keys = {}
     for _, k in ipairs(insts or {}) do
@@ -248,6 +254,7 @@ function ns.ClearAvailable(silent)
 end
 
 ns.Handle("W", function(sender, f)
+    if ns.WithOlympus() then return end
     local cat = ns.ValidCat(f[2])
     if not cat then return end
     for entry in (f[8] or ""):gmatch("[^;]+") do
@@ -318,6 +325,7 @@ end)
 -- Applying
 ------------------------------------------------------------------------
 function ns.Apply(leader, role, note)
+    if ns.WithOlympus() then return end   -- applications are Olympus's (its card's Apply)
     if not ns.RequireReady("apply") then return end
     local l = ns.listings[leader]
     if not l then ns.Print("That listing is gone.") return end
@@ -367,7 +375,7 @@ end)
 
 ns.Handle("JC", function(sender, f)
     local a = ns.applicants[sender]
-    if a and a.id == f[2] then
+    if a and not a.olympus and a.id == f[2] then
         ns.applicants[sender] = nil
         ns.Fire("APPLICANTS_UPDATED")
     end
@@ -404,6 +412,7 @@ function ns.InviteName(name)
 end
 
 function ns.InviteApplicant(name)
+    if ns.WithOlympus() then return ns.Olympus.InviteApplicant(name) end
     local a = ns.applicants[name]
     ns.InviteName(name)
     if a then
@@ -414,6 +423,7 @@ function ns.InviteApplicant(name)
 end
 
 function ns.DeclineApplicant(name)
+    if ns.WithOlympus() then return ns.Olympus.DeclineApplicant(name) end
     local a = ns.applicants[name]
     if not a then return end
     a.state = "declined"
