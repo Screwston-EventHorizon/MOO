@@ -323,12 +323,22 @@ local function findSlashCommand(command)
     end
 end
 
-function ns.OpenOlympus()
-    local fn = findSlashCommand("/oly") or findSlashCommand("/olympus")
+-- command: what follows /oly ("" opens the window, "privacy" its privacy page). Olympus registers
+-- its own key, SlashCmdList.OLYMPUS; the alias search is the fallback for anything else.
+function ns.OpenOlympus(command)
+    command = type(command) == "string" and command or ""
+    local list = type(SlashCmdList) == "table" and SlashCmdList or nil
+    local fn = list and type(list.OLYMPUS) == "function" and list.OLYMPUS
+        or findSlashCommand("/oly") or findSlashCommand("/olympus")
     if fn then
-        fn("")
+        local ok, err = pcall(fn, command)
+        if not ok then
+            ns.RecordError("open Olympus", err)
+            ns.Print("Olympus couldn't open from here. Use its minimap button.")
+        end
     elseif ns.OlympusAddonLoaded() then
-        ns.Print("Couldn't open Olympus from here. Type /oly in chat.")
+        -- (Olympus registers no slash command at a gamepad-UI login.)
+        ns.Print("Couldn't open Olympus from here. Use its minimap button" .. (command ~= "" and (", then /oly " .. command) or "") .. ".")
     else
         ns.Print("The Olympus addon is not loaded.")
     end

@@ -734,6 +734,7 @@ local function PlayersPage(parent)
         end,
         function(r, a)
             r.inv:SetScript("OnClick", function() ns.InviteName(a.name) end)
+            r.inv:SetShown(not a.own)
             if a.olympus then
                 -- a flag on Olympus's Board: invited as the Board's "Invite as" does; gear only
                 -- comes with an application
@@ -741,7 +742,7 @@ local function PlayersPage(parent)
                 r.c[1]:SetText(boardName(a.name, a.class, a.lvl))
                 r.c[2]:SetText(ns.Olympus.WantsText(a))
                 r.c[3]:SetText(ns.RolesText(a.roles))
-                r.c[4]:SetText(a.fits and "|cff33ff33fits your listing|r" or "")
+                r.c[4]:SetText(a.own and "|cffaaaaaayour flag|r" or a.fits and "|cff33ff33fits your listing|r" or "")
                 r.c[5]:SetText("")
                 r.gear:Hide()
                 return
@@ -1108,7 +1109,10 @@ local function makeMain()
     f.content = content
 
     -- Olympus link in the header
-    f.oly = Button(f, "Olympus", 80, 20, ns.OpenOlympus)
+    -- (While MOO's line on Olympus's privacy page waits for an answer, it opens that page.)
+    f.oly = Button(f, "Olympus", 80, 20, function()
+        if ns.Olympus and ns.Olympus.AwaitingAnswer() then ns.OpenOlympus("privacy") else ns.OpenOlympus() end
+    end)
     f.oly:SetPoint("TOPRIGHT", -30, -32)
     f.themeBtn = Button(f, "Dark mode", 86, 20, function()
         ns.SetTheme(ns.IsDark() and "classic" or "dark")
@@ -1155,8 +1159,12 @@ function ns.RefreshUI()
     elseif ns.CrossGuildOn() then
         cross = MOO_DB.channelKey and "|cff33ff33Cross-guild: on (sealed)|r" or "|cff33ff33Cross-guild: on|r"
     else cross = "|cffffaa00Your guild only (no officer key)|r" end
-    local oly = ns.OlympusAddonLoaded() and "|cff33ff33Olympus addon loaded|r" or "|cffffaa00Olympus addon not found|r"
+    local awaiting = ns.Olympus and ns.Olympus.AwaitingAnswer()
+    local oly = awaiting and "|cffffaa00Olympus: answer MOO's line to use its Board|r"
+        or ns.OlympusAddonLoaded() and "|cff33ff33Olympus addon loaded|r" or "|cffffaa00Olympus addon not found|r"
     main.status:SetText(cross .. "   " .. oly)
+    main.oly:SetText(awaiting and "Link Olympus" or "Olympus")
+    main.oly:SetWidth(awaiting and 100 or 80)
     main.oly:SetShown(ns.OlympusAddonLoaded())
     main.themeBtn:SetText(ns.IsDark() and "Classic" or "Dark mode")
     main.themeBtn:ClearAllPoints()

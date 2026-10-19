@@ -200,7 +200,8 @@ local function Looking(r)
     if #insts == 0 then insts = { "ANY" } end
     return {
         olympus = true, name = name, kind = kind, guild = Words(r.guild, 48), class = Class(r.class),
-        lvl = ns.Clamp(r.level, 0, 60, 0), roles = roles, insts = insts, fits = r.fits == true, note = "",
+        lvl = ns.Clamp(r.level, 0, 60, 0), roles = roles, insts = insts, fits = r.fits == true and r.own ~= true, note = "",
+        own = r.own == true, -- the player's own flag on the Board
     }
 end
 
@@ -382,6 +383,8 @@ end
 -- With Olympus or on its own
 ------------------------------------------------------------------------
 function Oly.Integrated() return integrated end
+-- MOO's line on Olympus's privacy page still waits for the player's answer (the link would work).
+function Oly.AwaitingAnswer() return not integrated and handle ~= nil and eventsOk and status == "pending" end
 function Oly.IsMember() return member == true end
 
 local RefreshBuilt
@@ -485,8 +488,12 @@ local function Setup()
 end
 Setup()
 
--- Before MOO's network starts (Comm.lua joins MOOnet on READY, after this).
-ns.Listen("READY", function() Oly.Evaluate() end)
+-- Before MOO's network starts (Comm.lua joins MOOnet on READY, after this). An Olympus that
+-- wasn't ready when MOO loaded gets one more try here.
+ns.Listen("READY", function()
+    if not handle and (why == "absent" or why == "features" or why == "consent") then Setup() end
+    Oly.Evaluate()
+end)
 
 ns.Listen("GEAR_UPDATED", function(name)
     local a = integrated and name and ns.applicants[name]
