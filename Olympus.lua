@@ -8,8 +8,9 @@
 --     every group and every player looking is on Olympus's Board, so everyone with
 --     Olympus sees them. MOO's Dungeons, Raids, PvP and Players tabs show that data, and
 --     "List a group" and "Apply" open Olympus's own dialog and card (the player clicks there).
---   * MOO's My Group panel takes the Board's "Your group" area (Olympus keeps a toggle
---     to show its own). Invite and Decline go through Olympus.
+--   * MOO's My Group panel takes the Board's "Your group" area (Olympus keeps a switch
+--     to show its own). Invite, Decline and Delist go through Olympus, and so does
+--     inviting a player looking.
 --   * Gear, stats and rating summaries still travel on MOO's own whispers: the leader's MOO
 --     asks an applicant Olympus reports, and the applicant's MOO answers only a leader
 --     whose listing Olympus says it applied to.
@@ -30,12 +31,18 @@ local KINDS = { dungeon = true, raid = true, pvp = true, quest = true }
 local CAT_KIND = { DUNGEON = "dungeon", RAID = "raid", BG = "pvp", WPVP = "pvp" }
 local KIND_LABEL = { dungeon = "dungeon", raid = "raid", pvp = "PvP", quest = "quest" }
 local ROLE_IN = { tank = "TANK", healer = "HEAL", damage = "DPS" }
+local ROLE_OUT = { TANK = "tank", HEAL = "healer", DPS = "damage" }
+-- Olympus writes classes as the chats' two-letter codes.
+local CLASS_FILE = { WA = "WARRIOR", PA = "PALADIN", HU = "HUNTER", RO = "ROGUE", PR = "PRIEST",
+    SH = "SHAMAN", MA = "MAGE", WL = "WARLOCK", DR = "DRUID", DK = "DEATHKNIGHT" }
+local LOOKING_KINDS = { dungeon = true, raid = true, pvp = true }
+local PANEL_HEIGHT = 480       -- MOO's My Group page, in the Board's panel frame
 local APPLIED = { waiting = "waiting", invited = "invited", declined = "declined" }
 local APPLICANT_STATE = { waiting = "new", invited = "invited" }
 
 local MAX_ROWS = 300           -- listings or players looking kept from one read
 local MAX_APPLICANTS = 40
-local LOOKING_EVERY = 10       -- seconds between reads of the players looking (no event tells MOO)
+local LOOKING_EVERY = 10       -- seconds between reads of the players looking, when no event tells MOO
 local GEAR_WAIT = 60           -- how long a leader's gear request waits for Olympus to report the application
 local MAX_WAITING = 10         -- gear requests waiting at once, so asks without an application cannot pile up
 
@@ -43,6 +50,7 @@ local handle                   -- MOO's handle from OlympusAPI.Register
 local why = "absent"           -- why MOO has no handle: "absent", "old", "features", "error" or Register's reason
 local status = "none"          -- the player's answer: "pending", "granted" or "refused"
 local eventsOk = false         -- Olympus took MOO's callbacks for GROUPS_CHANGED and MY_GROUP_CHANGED
+local lookingEvent = false     -- and for LOOKING_CHANGED
 local integrated = false
 local member                   -- GetProfile().member, while with Olympus
 local groups = {}              -- GetGroups(), checked, in the Board's order
@@ -50,7 +58,7 @@ local looking, lookingAt = {}, nil
 local mine                     -- GetMyGroup(), checked
 local asked = {}               -- [applicant .. "|" .. token] = true: one gear request per application
 local waiting = {}             -- [leader] = { token =, t = }: gear requests waiting for Olympus's report
-local panel = { tried = false, built = {} }
+local panel = { registered = false, built = {} }
 
 ------------------------------------------------------------------------
 -- Guarded access: OlympusAPI and the handle are another addon's tables
@@ -116,8 +124,12 @@ local function Name(v)
 end
 
 local function Id(v)
-    if type(v) ~= "string" or #v < 1 or #v > 64 or v:find("[%c|]") then return nil end
+    if type(v) ~= "string" or #v < 1 or #v > 128 or v:find("[%c|]") then return nil end
     return v
+end
+
+local function Class(v)
+    return type(v) == "string" and ns.ValidClass(CLASS_FILE[v] or v) or nil
 end
 
 local function Place(v)
@@ -139,13 +151,15 @@ local function Listing(g)
     local id, kind, leader = Id(g.id), KINDS[g.kind] and g.kind, Name(g.leader)
     if not id or not kind or not leader then return nil end
     local need = type(g.need) == "table" and g.need or {}
+    local anyNumber = type(need.anyNumber) == "table" and need.anyNumber or {}
     local row = {
         olympus = true, id = id, kind = kind, leader = leader,
         place = Place(g.place), placeName = Words(g.placeName, 40), questTitle = Words(g.questTitle, 40),
-        guild = Words(g.guild, 48), class = ns.ValidClass(g.class),
+        guild = Words(g.guild, 48), class = Class(g.class),
         lvl = ns.Clamp(g.level, 0, 60, 0), min = ns.Clamp(g.minLevel, 1, 60, 1), size = ns.Clamp(g.size, 0, 40, 0),
         t = ns.Clamp(need.tank, 0, 40, 0), h = ns.Clamp(need.healer, 0, 40, 0), d = ns.Clamp(need.damage, 0, 40, 0),
         any = need.any == true,
+        anyNumber = { TANK = anyNumber.tank == true, HEAL = anyNumber.healer == true, DPS = anyNumber.damage == true },
         note = Words(g.note, 80) or "",
         own = g.own == true,
         applied = APPLIED[g.applied],
@@ -158,7 +172,7 @@ local function Listing(g)
             local m = g.members[i]
             local count = type(m) == "table" and ns.Clamp(m.count, 0, 40, 0) or 0
             if count > 0 then
-                table.insert(row.members, { class = ns.ValidClass(m.class), role = ROLE_IN[m.role], count = count })
+                table.insert(row.members, { class = Class(m.class), role = ROLE_IN[m.role], count = count })
                 counted = counted + count
             end
         end
@@ -167,10 +181,10 @@ local function Listing(g)
     return row
 end
 
-local function Looking(r, kind)
+local function Looking(r)
     if type(r) ~= "table" then return nil end
-    local name = Name(r.name)
-    if not name then return nil end
+    local name, kind = Name(r.name), LOOKING_KINDS[r.kind] and r.kind
+    if not name or not kind then return nil end
     local roles = {}
     local rs = type(r.roles) == "table" and r.roles or {}
     for _, role in ipairs({ "tank", "healer", "damage" }) do
@@ -185,7 +199,7 @@ local function Looking(r, kind)
     end
     if #insts == 0 then insts = { "ANY" } end
     return {
-        olympus = true, name = name, kind = kind, guild = Words(r.guild, 48), class = ns.ValidClass(r.class),
+        olympus = true, name = name, kind = kind, guild = Words(r.guild, 48), class = Class(r.class),
         lvl = ns.Clamp(r.level, 0, 60, 0), roles = roles, insts = insts, fits = r.fits == true, note = "",
     }
 end
@@ -202,7 +216,7 @@ local function MyGroup(m)
             if olyName and state and role then
                 table.insert(out.applicants, {
                     name = ns.FullName(olyName), olyName = olyName, role = role, olyRole = a.role,
-                    lvl = ns.Clamp(a.level, 0, 60, 0), class = ns.ValidClass(a.class),
+                    lvl = ns.Clamp(a.level, 0, 60, 0), class = Class(a.class),
                     note = Words(a.note, 80) or "", state = state,
                 })
             end
@@ -213,7 +227,7 @@ local function MyGroup(m)
             local x = m.members[i]
             local name = type(x) == "table" and Name(x.name)
             if name then
-                table.insert(out.members, { name = name, class = ns.ValidClass(x.class), lvl = ns.Clamp(x.level, 0, 60, 0), role = ROLE_IN[x.role] })
+                table.insert(out.members, { name = name, class = Class(x.class), lvl = ns.Clamp(x.level, 0, 60, 0), role = ROLE_IN[x.role] })
             end
         end
     end
@@ -300,6 +314,17 @@ local function TakeGroups(list)
     AnswerWaiting()
 end
 
+local function TakeLooking(list)
+    local out = {}
+    if type(list) == "table" then
+        for i = 1, math.min(#list, MAX_ROWS) do
+            local r = Looking(list[i])
+            if r then table.insert(out, r) end
+        end
+    end
+    looking = out
+end
+
 -- The leader's MOO asks each new applicant's MOO for gear, stats and rating summary.
 local function AskGear(name, token)
     local key = name .. "|" .. token
@@ -340,6 +365,9 @@ local function ReadAll()
     if type(g) == "table" then TakeGroups(g) elseif r2 == "busy" then busy = true else TakeGroups(nil) end
     local m, r3 = Call("GetMyGroup")
     if type(m) == "table" then TakeMine(m) elseif r3 == "busy" then busy = true else TakeMine(nil) end
+    local l, r4 = Call("GetLooking")
+    lookingAt = GetTime()
+    if type(l) == "table" then TakeLooking(l) elseif r4 == "busy" then busy = true else TakeLooking(nil) end
     if busy and not retryQueued then
         retryQueued = true
         C_Timer.After(5, function()
@@ -358,16 +386,22 @@ function Oly.IsMember() return member == true end
 
 local RefreshBuilt
 
+-- Registered while with Olympus; taken off after a No, so the Board's own comes back.
 local function RegisterPanel()
-    if panel.tried then return end
-    panel.tried = true
+    if panel.registered then return end
     local ok, reason = Call("RegisterGroupPanel", {
         label = "Muster Of Olympus (MOO)",
         build = function(frame) Guard("panel", panel.Build, frame) end,
         refresh = function(frame) Guard("panel", RefreshBuilt, frame) end,
     })
-    panel.registered = ok == true
+    panel.registered = ok == true or reason == "registered"
     panel.why = (not panel.registered) and (reason or "failed") or nil
+end
+
+local function UnregisterPanel()
+    if not panel.registered then return end
+    local ok, reason = Call("UnregisterGroupPanel")
+    if ok == true or reason == "unregistered" then panel.registered = false end
 end
 
 local function Enter()
@@ -392,6 +426,7 @@ local function Leave()
     member, mine = nil, nil
     groups, looking, lookingAt, waiting = {}, {}, nil, {}
     ns.applicants = {}
+    UnregisterPanel()
     ns.JoinChannel()
 end
 
@@ -439,6 +474,12 @@ local function Setup()
         if not integrated then return end
         TakeMine(m)
         ns.Fire("APPLICANTS_UPDATED")
+    end)
+    lookingEvent = Listen("LOOKING_CHANGED", function(list)
+        if not integrated then return end
+        TakeLooking(list)
+        lookingAt = GetTime()
+        ns.Fire("LISTINGS_UPDATED")
     end)
     eventsOk = a and b
 end
@@ -489,12 +530,13 @@ end
 
 function panel.Build(frame)
     if panel.built[frame] then return ShowBuilt(panel.built[frame]) end
+    frame:SetHeight(PANEL_HEIGHT)
     local b = { page = ns.UI.MyGroupPage(frame), notice = ns.UI.Text(frame, "GameFontHighlight") }
     b.notice:SetPoint("TOPLEFT", 8, -8)
     b.notice:SetPoint("RIGHT", -8, 0)
     b.notice:SetWordWrap(true)
     b.notice:SetText("MOO works on its own right now (answer MOO's line on Olympus's privacy page, /oly privacy). " ..
-        "Click \"Show Olympus's own panel\" to see your group here.")
+        "Pick \"Olympus's own\" above to see your group here.")
     panel.built[frame] = b
     ShowBuilt(b)
 end
@@ -538,29 +580,20 @@ end
 -- The Board's players looking. filter: nil/"ALL", "MATCH" (fits my listing) or a MOO category.
 function Oly.Looking(filter)
     if not integrated then return {} end
-    if not lookingAt or GetTime() - lookingAt >= LOOKING_EVERY then
+    -- LOOKING_CHANGED keeps them current; without it, a read now and then
+    if not lookingEvent and (not lookingAt or GetTime() - lookingAt >= LOOKING_EVERY) then
         lookingAt = GetTime()
-        for _, kind in ipairs({ "dungeon", "raid", "pvp" }) do
-            local rows, reason = Call("GetLooking", kind)
-            if type(rows) == "table" then
-                local list = {}
-                for i = 1, math.min(#rows, MAX_ROWS) do
-                    local r = Looking(rows[i], kind)
-                    if r then table.insert(list, r) end
-                end
-                looking[kind] = list
-            elseif reason ~= "busy" then
-                looking[kind] = {}
-            end
-        end
+        local rows, reason = Call("GetLooking")
+        if type(rows) == "table" then TakeLooking(rows) elseif reason ~= "busy" then TakeLooking(nil) end
     end
     local kind = filter and CAT_KIND[filter]
-    local out = {}
-    for _, k in ipairs({ "dungeon", "raid", "pvp" }) do
-        for _, r in ipairs(looking[k] or {}) do
-            if (filter == "MATCH" and r.fits) or (kind and k == kind) or (not kind and filter ~= "MATCH") then
-                table.insert(out, r)
-            end
+    local out, seen = {}, {}
+    for _, r in ipairs(looking) do
+        local keep = (filter == "MATCH" and r.fits) or (kind and r.kind == kind) or (not kind and filter ~= "MATCH")
+        -- a flag that names two kinds is in both sections: once here, unless one kind is asked
+        if keep and (kind or not seen[r.name]) then
+            seen[r.name] = true
+            table.insert(out, r)
         end
     end
     return out
@@ -586,12 +619,28 @@ function Oly.PlaceText(l)
     return l.placeName or InstName(l.place) or ("Any " .. KIND_LABEL[l.kind])
 end
 
+-- What a listing still needs; a role that takes any number reads "1+".
 function Oly.NeedsText(l)
-    local text = ns.NeedsText(l)
-    if l.any then
-        text = (l.t + l.h + l.d > 0) and (text .. " |cffaaaaaa+ any|r") or "|cffaaaaaaany role|r"
+    local parts = {}
+    for _, role in ipairs(ns.ROLES) do
+        local n = (role == "TANK" and l.t) or (role == "HEAL" and l.h) or l.d
+        if n > 0 then
+            local count = (l.anyNumber and l.anyNumber[role]) and (n .. "+") or tostring(n)
+            table.insert(parts, "|c" .. ns.ROLE_COLOR[role] .. count .. " " .. ns.ROLE_LABEL[role] .. "|r")
+        end
     end
-    return text
+    return #parts > 0 and table.concat(parts, " ") or "|cff888888full|r"
+end
+
+-- The first role a player looking plays (any, when his flag names none) that my listing still needs.
+local function RoleFor(a, l)
+    local plays = {}
+    for _, r in ipairs(a.roles or {}) do plays[r] = true end
+    local any = next(plays) == nil
+    for _, role in ipairs(ns.ROLES) do
+        local n = (role == "TANK" and l.t) or (role == "HEAL" and l.h) or l.d
+        if n > 0 and (any or plays[role]) then return role end
+    end
 end
 
 function Oly.WantsText(a)
@@ -616,6 +665,10 @@ local REASONS = {
     unknown = "that listing or applicant is gone",
     role = "the listing doesn't want that role any more",
     unavailable = "this Olympus can't do that",
+    invited = "already invited, waiting for them to join",
+    invite = "the game refused the invite",
+    kind = "Olympus doesn't know that kind of group",
+    failed = "Olympus couldn't do it",
 }
 
 local function Refused(what, reason)
@@ -633,6 +686,38 @@ function Oly.OpenGroup(id)
     if not integrated or not Id(id) then return false end
     local ok, reason = Call("OpenGroup", id)
     if ok ~= true then Refused("Couldn't open that group on Olympus's Board", reason) end
+    return ok == true
+end
+
+function Oly.OpenFlagDialog(kind)
+    if not integrated then return false end
+    local ok, reason = Call("OpenFlagDialog", LOOKING_KINDS[kind] and kind or nil)
+    if ok ~= true then Refused("Couldn't open Olympus's flag", reason) end
+    return ok == true
+end
+
+function Oly.LowerListing()
+    if not integrated then return false end
+    local ok, reason = Call("LowerListing")
+    if ok ~= true then Refused("Couldn't take your listing down", reason) end
+    return ok == true
+end
+
+-- Invite a player looking, as a role my listing still needs, the Board's "Invite as" way.
+function Oly.InviteLooking(a)
+    if not integrated or type(a) ~= "table" or not a.olympus then return false end
+    local l = mine and mine.listing
+    if not l then
+        ns.Print("List a group on the Board first: Olympus invites a player looking as a role your listing needs.")
+        return false
+    end
+    local role = RoleFor(a, l)
+    if not role then
+        ns.Print("Your listing doesn't need a role " .. ns.ShortName(a.name) .. " plays.")
+        return false
+    end
+    local ok, reason = Call("InviteLooking", a.name, ROLE_OUT[role])
+    if ok ~= true then Refused("Olympus couldn't invite " .. ns.ShortName(a.name), reason) end
     return ok == true
 end
 

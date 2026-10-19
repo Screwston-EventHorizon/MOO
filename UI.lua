@@ -668,12 +668,15 @@ local function PlayersPage(parent)
     saved.insts, saved.roles = p.inst.selected, p.roles.selected
 
     -- With Olympus's Board: the players looking are its flags, raised on the Board
-    p.flagBtn = Button(p, "Open Olympus", 110, 22, ns.OpenOlympus)
+    p.flagBtn = Button(p, "Raise a flag", 110, 22, function()
+        local f = p.filter and p.filter.value
+        ns.Olympus.OpenFlagDialog(f and ns.Olympus.KindOfCat(f))
+    end)
     p.flagBtn:SetPoint("TOPLEFT", 4, -22)
     p.flagNote = Text(p, "GameFontHighlightSmall")
     p.flagNote:SetPoint("LEFT", p.flagBtn, "RIGHT", 10, 0)
     p.flagNote:SetPoint("RIGHT", -4, 0)
-    p.flagNote:SetText("Players looking are the flags on Olympus's Board. Raise yours there, so every Olympus player sees it.")
+    p.flagNote:SetText("Players looking are the flags on Olympus's Board. This opens Olympus's own flag, so every Olympus player sees yours.")
     p.formParts = { p.cat, p.inst, p.roles, noteL, p.note, p.go, p.stop }
 
     local lt = Section(p, "Available players")
@@ -732,7 +735,9 @@ local function PlayersPage(parent)
         function(r, a)
             r.inv:SetScript("OnClick", function() ns.InviteName(a.name) end)
             if a.olympus then
-                -- a flag on Olympus's Board: gear only comes with an application
+                -- a flag on Olympus's Board: invited as the Board's "Invite as" does; gear only
+                -- comes with an application
+                r.inv:SetScript("OnClick", function() ns.Olympus.InviteLooking(a) end)
                 r.c[1]:SetText(boardName(a.name, a.class, a.lvl))
                 r.c[2]:SetText(ns.Olympus.WantsText(a))
                 r.c[3]:SetText(ns.RolesText(a.roles))
@@ -807,6 +812,8 @@ local function MyGroupPage(parent)
         ns.Olympus.OpenListingDialog(l and l.kind)
     end)
     p.edit:SetPoint("TOPRIGHT", -4, -2)
+    p.lower = Button(p, "Delist", 64, 20, function() ns.Olympus.LowerListing() end)
+    p.lower:SetPoint("RIGHT", p.edit, "LEFT", -4, 0)
 
     local hdr = CreateFrame("Frame", nil, p)
     hdr:SetPoint("TOPLEFT", 4, -28); hdr:SetPoint("RIGHT", -4, 0); hdr:SetHeight(14)
@@ -905,17 +912,17 @@ local function MyGroupPage(parent)
         if board then
             -- Olympus plays its own sound for applicants
             self.t:Hide(); self.h:Hide(); self.d:Hide(); self.sound:Hide()
-            self.edit:SetShown(l ~= nil)
+            self.edit:SetShown(l ~= nil); self.lower:SetShown(l ~= nil)
             self.status:SetText(l and ("Your listing on Olympus's Board: |cffffffff" .. ns.Olympus.PlaceText(l) ..
                 "|r   still need: " .. ns.Olympus.NeedsText(l))
                 or "You have no listing on Olympus's Board. List a group from Dungeons, Raids or PvP.")
         elseif l then
-            self.edit:Hide(); self.sound:Show()
+            self.edit:Hide(); self.lower:Hide(); self.sound:Show()
             self.status:SetText("Your listing: |cffffffff" .. ns.InstanceName(l.inst) .. "|r   still need:")
             self.t:Set(l.t); self.h:Set(l.h); self.d:Set(l.d)
             self.t:Show(); self.h:Show(); self.d:Show()
         else
-            self.edit:Hide(); self.sound:Show()
+            self.edit:Hide(); self.lower:Hide(); self.sound:Show()
             self.status:SetText("You have no listing. List a group from Dungeons, Raids or PvP.")
             self.t:Hide(); self.h:Hide(); self.d:Hide()
         end

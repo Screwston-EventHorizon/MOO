@@ -57,8 +57,8 @@ The Olympus addon has its own group finder on its Board. When an Olympus version
 
 - **You choose.** MOO's line appears on Olympus's privacy page (`/oly privacy`). Until you answer, and after a No, MOO works on its own exactly as described above.
 - **After a Yes:**
-  - Groups and players looking come from Olympus's Board, and MOO shows them on its Dungeons, Raids, PvP and Players tabs. "List a group" and "Apply" open Olympus's own dialog and group card, so you apply there yourself. MOO sends no listings or "available" flags of its own and stays off its hidden channel. To show you're looking, raise your flag on the Board.
-  - MOO's My Group panel (applicants with gear, iLvl and rating, your roster, the ready check) appears in the Board's "Your group" area. Olympus has a "Show Olympus's own panel" toggle to switch back at any time. Invite and Decline go through Olympus; to edit your listing's needs, use "Edit listing", which opens Olympus's dialog.
+  - Groups and players looking come from Olympus's Board, and MOO shows them on its Dungeons, Raids, PvP and Players tabs. "List a group" and "Apply" open Olympus's own dialog and group card, so you apply there yourself. MOO sends no listings or "available" flags of its own and stays off its hidden channel. "Raise a flag" on the Players tab opens Olympus's own flag, and "Invite" there invites a player looking as a role your listing needs, the way the Board does.
+  - MOO's My Group panel (applicants with gear, iLvl and rating, your roster, the ready check) appears in the Board's "Your group" area. A switch above it ("Olympus's own") brings Olympus's own panel back at any time. Invite, Decline and Delist go through Olympus; to change what your listing needs, "Edit listing" opens Olympus's dialog.
   - MOO takes your Olympus membership from Olympus instead of checking your guild's name.
   - Gear, stats and your rating summary still go only by MOO whisper, and only to a leader who also runs MOO, after you applied to their listing on the Board.
   - Ratings, the Coach, the ready check and the Feedback tab work as always.
