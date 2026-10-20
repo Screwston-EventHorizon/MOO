@@ -468,6 +468,11 @@ local function GroupPage(parent, cats, title)
     p.boardNote:SetPoint("LEFT", p.board, "RIGHT", 10, 0)
     p.boardNote:SetPoint("RIGHT", -4, 0)
     p.boardNote:SetText("Groups are on Olympus's Board, so every Olympus player sees them. This opens Olympus's own dialog.")
+    -- The Board's players looking for this kind, the player's own flag first (they're listed on
+    -- the Players tab): a flag isn't a group, so it never shows in the listings below.
+    p.flagNote = Text(p, "GameFontHighlightSmall")
+    p.flagNote:SetPoint("TOPLEFT", 4, -58)
+    p.flagNote:SetPoint("RIGHT", p.role, "LEFT", -8, 0)
     p.formParts = { p.inst, p.t, p.h, p.d, minL, p.min, noteL, p.note, p.post, p.delist }
 
     -- Listings
@@ -573,8 +578,17 @@ local function GroupPage(parent, cats, title)
         for _, part in ipairs(self.formParts) do part:SetShown(not board) end
         self.board:SetShown(board)
         self.boardNote:SetShown(board)
+        self.flagNote:SetShown(board)
         self.role:SetValue(MOO_CharDB.role)
         if board then
+            local mine, others = false, 0
+            for _, r in ipairs(ns.Olympus.Looking(cats[1])) do
+                if r.own then mine = true else others = others + 1 end
+            end
+            local looking = others == 0 and "no other players looking"
+                or others == 1 and "1 other player looking" or (others .. " other players looking")
+            self.flagNote:SetText((mine and "|cff33ff33Your flag is up on Olympus's Board|r, " or "Olympus's Board: ")
+                .. looking .. " (see the Players tab).")
             self.list:SetData(ns.Olympus.Listings(cats), "No " .. title:lower() .. " on Olympus's Board right now. List one above!")
             return
         end
