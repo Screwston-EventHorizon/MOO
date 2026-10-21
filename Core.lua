@@ -5,7 +5,7 @@
 local ADDON, ns = ...
 _G.MOO = ns
 
-ns.VERSION = "0.12.0-alpha"
+ns.VERSION = "0.13.0-alpha"
 ns.PREFIX  = "MOO1"
 
 -- Cross-guild: MOO users in every Olympus guild share one hidden channel.
