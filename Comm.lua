@@ -6,6 +6,8 @@
 --   until you are out (Forever, like Midnight, restricts addon messages there).
 -- * "NET" messages go to your guild, and (once an officer has set a key) to a sealed
 --   hidden channel shared by MOO users in every Olympus guild using the same key.
+-- * With Olympus's Board (Olympus.lua), listings and flags are Olympus's: MOO sends no
+--   "NET" listings or flags and stays out of the channel.
 
 local _, ns = ...
 
@@ -57,6 +59,15 @@ local function leaveChannel()
 end
 
 function ns.JoinChannel()
+    -- With Olympus's Board (Olympus.lua) MOO sends no listings or flags, the only things the
+    -- channel carries: stay out of it.
+    if ns.WithOlympus() then
+        deriveChannel()
+        leaveChannel()
+        if (GetChannelName("MOOnet") or 0) > 0 then LeaveChannelByName("MOOnet") end
+        channelName, channelPass = nil, nil
+        return
+    end
     if not ns.InOlympus() then return end
     if not ns.CROSS_GUILD then
         channelName = nil
@@ -83,6 +94,7 @@ function ns.RejoinChannel()
 end
 
 function ns.ChannelStatus()
+    if ns.WithOlympus() then return "not used (groups are on Olympus's Board)" end
     if not ns.CROSS_GUILD then return "off (your guild only)" end
     if not channelName then return "off (no officer key yet: your guild only)" end
     local kind = (MOO_DB and MOO_DB.channelKey) and "sealed" or "open"
@@ -224,8 +236,8 @@ local function onAddonMessage(prefix, msg, dist, sender, logged)
     -- the same NET message arrives twice for guildmates (guild + channel)
     if (dist == "GUILD" or dist == "CHANNEL") and duplicate(sender, msg) then return end
     if flooding(sender) then return end
-    -- the channel only counts while sealed with an officer key
-    if dist == "CHANNEL" and not (ns.CrossGuildOn and ns.CrossGuildOn()) then return end
+    -- the channel only counts while sealed with an officer key, and never with Olympus's Board
+    if dist == "CHANNEL" and (ns.WithOlympus() or not (ns.CrossGuildOn and ns.CrossGuildOn())) then return end
     -- players the game showed us in a non-Olympus guild are ignored (except in our group)
     if dist ~= "PARTY" and dist ~= "RAID" and ns.GuildStatus and ns.GuildStatus(sender) == "other" then return end
     local fields = { strsplit(SEP, msg) }

@@ -278,7 +278,13 @@ function ns.IsOlympusGuildName(guild)
     return true
 end
 
+-- With Olympus's Board (Olympus.lua), MOO lets Olympus say who is a member.
+function ns.WithOlympus()
+    return ns.Olympus ~= nil and ns.Olympus.Integrated()
+end
+
 function ns.InOlympus()
+    if ns.WithOlympus() then return ns.Olympus.IsMember() end
     if not IsInGuild() then return false end
     local guild = GetGuildInfo("player")
     return ns.IsOlympusGuildName(guild)
@@ -334,19 +340,41 @@ local function sendThroughChat(command)
     return ok
 end
 
-function ns.OpenOlympus()
+-- Blizzard's gamepad UI is on: the game blocks an addon that drives the chat box there.
+local function gamepadUI()
+    local style = C_InputInterfaceStyle and C_InputInterfaceStyle.GetCurrentStyle
+    local pad = Enum and Enum.InputDeviceInterfaceType and Enum.InputDeviceInterfaceType.Gamepad
+    if type(style) ~= "function" or pad == nil then return false end
+    local ok, current = pcall(style)
+    return ok and current == pad
+end
+
+-- command: what follows /oly ("" opens the window, "privacy" its privacy page). Olympus registers
+-- its own key, SlashCmdList.OLYMPUS; the alias search is the fallback for anything else, then the
+-- chat box (never with the gamepad UI, where Olympus registers no slash command at login).
+function ns.OpenOlympus(command)
+    command = type(command) == "string" and command or ""
     if not ns.OlympusAddonLoaded() then
         ns.Print("The Olympus addon is not loaded.")
         return
     end
-    local fn = findSlashCommand("/oly") or findSlashCommand("/olympus")
-    if fn and pcall(fn, "") then return end
-    if sendThroughChat("/oly") then return end
-    if ChatFrame_OpenChat then
-        ChatFrame_OpenChat("/oly")     -- last resort: /oly typed in the chat box, press Enter
-    else
-        ns.Print("Couldn't open Olympus from here. Type /oly in chat.")
+    local list = type(SlashCmdList) == "table" and SlashCmdList or nil
+    local fn = list and type(list.OLYMPUS) == "function" and list.OLYMPUS
+        or findSlashCommand("/oly") or findSlashCommand("/olympus")
+    if fn then
+        local ok, err = pcall(fn, command)
+        if ok then return end
+        ns.RecordError("open Olympus", err)
     end
+    local typed = "/oly" .. (command ~= "" and (" " .. command) or "")
+    if not gamepadUI() then
+        if sendThroughChat(typed) then return end
+        if ChatFrame_OpenChat then
+            ChatFrame_OpenChat(typed)     -- last resort: the command typed in the chat box, press Enter
+            return
+        end
+    end
+    ns.Print("Couldn't open Olympus from here. Use its minimap button" .. (command ~= "" and (", then " .. typed) or "") .. ".")
 end
 
 ------------------------------------------------------------------------
@@ -394,7 +422,8 @@ ns.On("PLAYER_LOGIN", function()
     C_Timer.After(5, function()
         ns.Fire("READY")
         if ns.InOlympus() then
-            local extra = ns.OlympusAddonLoaded() and "" or " (tip: install the Olympus addon too)"
+            local extra = ns.OlympusAddonLoaded() and (ns.Olympus and ns.Olympus.LoginNote() or "")
+                or " (tip: install the Olympus addon too)"
             ns.Print("v" .. ns.VERSION .. " loaded. Type /mooo to open (plain /moo still moos)." .. extra)
             local _, _, rankIndex = GetGuildInfo("player")
             if ns.CROSS_GUILD and ns.REQUIRE_KEY and not MOO_DB.channelKey and rankIndex and rankIndex <= 1 then
@@ -554,6 +583,7 @@ function ns.PrintStatus()
     ns.Print("Olympus guild: " .. (ns.InOlympus() and "yes" or "no") ..
         "  |  Olympus addon: " .. (ns.OlympusAddonLoaded() and "loaded" or "not loaded"))
     ns.Print("Opted in: " .. (ns.IsOptedIn() and "yes" or "no") .. "  |  Role: " .. MOO_CharDB.role)
+    if ns.Olympus then ns.Print("Olympus link: " .. ns.Olympus.StatusText()) end
     ns.Print("Network channel: " .. (ns.ChannelStatus and ns.ChannelStatus() or "?"))
     if not ns.CROSS_GUILD then
         ns.Print("Cross-guild features are switched off in this build.")
@@ -694,6 +724,10 @@ function ns.BugReport()
     add("Date: ", date("%Y-%m-%d %H:%M"))
     add("Olympus guild: ", ns.InOlympus() and "yes" or "no", "   Officer: ", (ns.AmOfficer and ns.AmOfficer()) and "yes" or "no")
     add("Olympus addon: ", ns.OlympusAddonLoaded() and "loaded" or "not loaded")
+    if ns.Olympus then
+        add("Olympus link: ", ns.Olympus.StatusText())
+        if ns.WithOlympus() then add("Board listings seen: ", ns.Olympus.ListingCount()) end
+    end
     add("Opted in: ", ns.IsOptedIn() and "yes" or "no", "   Role: ", MOO_CharDB and MOO_CharDB.role or "?",
         "   Private tips: ", (MOO_CharDB and MOO_CharDB.suggestionsOff) and "off" or "on")
     add("Cross-guild: ", ns.ChannelStatus and ns.ChannelStatus() or "?")

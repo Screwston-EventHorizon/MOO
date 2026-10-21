@@ -1,5 +1,7 @@
 -- MOO UI: the main window (styled like Blizzard's guild window, as Olympus is),
 -- the player detail card (rating + gear + stats), and the minimap button.
+-- With Olympus's Board (Olympus.lua), the group tabs show the Board's listings and players
+-- looking, and the My Group page also fills the Board's "Your group" panel.
 
 local _, ns = ...
 
@@ -393,6 +395,17 @@ local function nameText(name, class, lvl)
     return s
 end
 
+-- A name from Olympus's Board: Olympus already checked the guild.
+local function boardName(name, class, lvl)
+    local s = ns.ClassColor(class, ns.ShortName(name))
+    if lvl and lvl > 0 then s = "|cffaaaaaa" .. lvl .. "|r " .. s end
+    return s
+end
+
+local function className(class)
+    return (LOCALIZED_CLASS_NAMES_MALE and class and LOCALIZED_CLASS_NAMES_MALE[class]) or (class and class:sub(1, 1) .. class:sub(2):lower()) or "?"
+end
+
 ------------------------------------------------------------------------
 -- Group finder page (Dungeons, Raids, PvP)
 ------------------------------------------------------------------------
@@ -491,6 +504,46 @@ local function fillListingButton(r, l)
     end
 end
 
+-- A listing from Olympus's Board (Olympus.lua): its tooltip and its row. Olympus sends counts
+-- by class and role, not names; Apply opens its card on the Board, where the player applies.
+local function boardListingTooltip(self)
+    local l = self.item
+    if not (l and l.olympus) then return listingTooltip(self) end
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:AddLine(ns.ShortName(l.leader) .. "'s group - " .. ns.Olympus.PlaceText(l))
+    if l.guild then GameTooltip:AddLine("Guild: " .. l.guild, 0.4, 1, 0.4) end
+    if l.note ~= "" then GameTooltip:AddLine(l.note, 1, 1, 1, true) end
+    GameTooltip:AddLine("Min level " .. l.min, 0.7, 0.7, 0.7)
+    GameTooltip:AddLine(" ")
+    for _, m in ipairs(l.members) do
+        GameTooltip:AddLine(m.count .. " x " .. ns.ClassColor(m.class, className(m.class)) ..
+            (m.role and ("  " .. ns.RoleText(m.role)) or ""))
+    end
+    if l.own then GameTooltip:AddLine("This is your listing.", 1, 0.82, 0) end
+    GameTooltip:AddLine("Click to open it on Olympus's Board.", 0.5, 0.5, 0.5)
+    GameTooltip:Show()
+end
+
+local function fillBoardButton(r, l)
+    r.mine:SetShown(l.own)
+    r.btn:SetShown(not l.own)
+    if l.own then return end
+    r.btn:Enable()
+    r.btn:SetScript("OnClick", function() ns.Olympus.OpenGroup(l.id) end)
+    if l.applied == "invited" then r.btn:SetText("Invited"); r.btn:Disable()
+    elseif l.applied == "declined" then r.btn:SetText("Declined"); r.btn:Disable()
+    elseif l.applied == "waiting" then r.btn:SetText("Applied")
+    else
+        r.btn:SetText("Apply")
+        if UnitLevel("player") < l.min then r.btn:Disable() end
+    end
+end
+
+local function openListing(self)
+    if not self.item then return end
+    if self.item.olympus then ns.Olympus.OpenGroup(self.item.id) else ns.ShowGroup(self.item.leader) end
+end
+
 local function GroupPage(parent, cats, title)
     local p = CreateFrame("Frame", nil, parent)
     p:SetAllPoints()
@@ -541,6 +594,21 @@ local function GroupPage(parent, cats, title)
     end)
     p.role:SetPoint("TOPRIGHT", -4, -52)
 
+    -- With Olympus's Board: the listings are Olympus's, listed from its own dialog
+    local kind = ns.Olympus.KindOfCat(cats[1])
+    p.board = Button(p, "List a group", 110, 22, function() ns.Olympus.OpenListingDialog(kind) end)
+    p.board:SetPoint("TOPLEFT", 4, -22)
+    p.boardNote = Text(p, "GameFontHighlightSmall")
+    p.boardNote:SetPoint("LEFT", p.board, "RIGHT", 10, 0)
+    p.boardNote:SetPoint("RIGHT", -4, 0)
+    p.boardNote:SetText("Groups are on Olympus's Board, so every Olympus player sees them. This opens Olympus's own dialog.")
+    -- The Board's players looking for this kind, the player's own flag first (they're listed on
+    -- the Players tab): a flag isn't a group, so it never shows in the listings below.
+    p.flagNote = Text(p, "GameFontHighlightSmall")
+    p.flagNote:SetPoint("TOPLEFT", 4, -58)
+    p.flagNote:SetPoint("RIGHT", p.role, "LEFT", -8, 0)
+    p.formParts = { p.inst, p.t, p.h, p.d, minL, p.min, noteL, p.note, p.post, p.delist }
+
     -- Listings
     local lt = Section(p, title)
     lt:SetPoint("TOPLEFT", 4, -88)
@@ -559,11 +627,20 @@ local function GroupPage(parent, cats, title)
             r.c[2]:SetWidth(165)
             r.c[5]:SetWidth(130)
             buildListingButton(r)
-            r:SetScript("OnClick", function(self) if self.item then ns.ShowGroup(self.item.leader) end end)
-            r:SetScript("OnEnter", listingTooltip)
+            r:SetScript("OnClick", openListing)
+            r:SetScript("OnEnter", boardListingTooltip)
             r:SetScript("OnLeave", GameTooltip_Hide)
         end,
         function(r, l)
+            if l.olympus then
+                r.c[1]:SetText(boardName(l.leader, l.class, l.lvl))
+                r.c[2]:SetText(ns.Olympus.PlaceText(l))
+                r.c[3]:SetText(ns.Olympus.NeedsText(l))
+                r.c[4]:SetText("|cffaaaaaa" .. l.size .. (l.size == 1 and " player" or " players") .. "|r")
+                r.c[5]:SetText(l.note)
+                fillBoardButton(r, l)
+                return
+            end
             r.c[1]:SetText(nameText(l.leader, l.class, l.lvl))
             r.c[2]:SetText(ns.InstanceName(l.inst))
             r.c[3]:SetText(ns.NeedsText(l))
@@ -577,8 +654,26 @@ local function GroupPage(parent, cats, title)
     p.share = SharePrompt(p.list)
 
     function p:Refresh()
-        self.inst:Refresh()
+        local board = ns.WithOlympus()
+        for _, part in ipairs(self.formParts) do part:SetShown(not board) end
+        self.board:SetShown(board)
+        self.boardNote:SetShown(board)
+        self.flagNote:SetShown(board)
         self.role:SetValue(MOO_CharDB.role)
+        if board then
+            local mine, others = false, 0
+            for _, r in ipairs(ns.Olympus.Looking(cats[1])) do
+                if r.own then mine = true else others = others + 1 end
+            end
+            local looking = others == 0 and "no other players looking"
+                or others == 1 and "1 other player looking" or (others .. " other players looking")
+            self.flagNote:SetText((mine and "|cff33ff33Your flag is up on Olympus's Board|r, " or "Olympus's Board: ")
+                .. looking .. " (see the Players tab).")
+            self.list:SetData(ns.Olympus.Listings(cats), "No " .. title:lower() .. " on Olympus's Board right now. List one above!")
+            self.share:Hide()
+            return
+        end
+        self.inst:Refresh()
         local mine = myListingRow(cats)
         self.post:SetText(mine and "Update" or "List group")
         self.delist:SetShown(mine ~= nil)
@@ -676,6 +771,16 @@ local function QuestPage(parent)
     end)
     p.role:SetPoint("TOPRIGHT", -4, -52)
 
+    -- With Olympus's Board: quest groups are listed from Olympus's own dialog (a quest from the
+    -- log, or a typed name), like the other kinds
+    p.board = Button(p, "List a group", 110, 22, function() ns.Olympus.OpenListingDialog("quest") end)
+    p.board:SetPoint("TOPLEFT", 4, -22)
+    p.boardNote = Text(p, "GameFontHighlightSmall")
+    p.boardNote:SetPoint("LEFT", p.board, "RIGHT", 10, 0)
+    p.boardNote:SetPoint("RIGHT", -4, 0)
+    p.boardNote:SetText("Quest groups are on Olympus's Board, so every Olympus player sees them. This opens Olympus's own dialog.")
+    p.formParts = { p.quest, p.custom, p.n, minL, p.min, noteL, p.note, p.post, p.delist }
+
     -- Listings
     local lt = Section(p, "Quest groups")
     lt:SetPoint("TOPLEFT", 4, -88)
@@ -693,7 +798,8 @@ local function QuestPage(parent)
         end
         add(ns.CurrentZone())
         local zones = {}
-        for _, l in pairs(ns.listings) do
+        local source = ns.WithOlympus() and ns.Olympus.Listings({ "QUEST" }) or ns.listings
+        for _, l in pairs(source) do
             if l.cat == "QUEST" and l.zone and l.zone ~= "" then zones[l.zone] = true end
         end
         local sorted = {}
@@ -721,11 +827,20 @@ local function QuestPage(parent)
             r.c[3]:SetWidth(120)
             r.c[5]:SetWidth(105)
             buildListingButton(r)
-            r:SetScript("OnClick", function(self) if self.item then ns.ShowGroup(self.item.leader) end end)
-            r:SetScript("OnEnter", listingTooltip)
+            r:SetScript("OnClick", openListing)
+            r:SetScript("OnEnter", boardListingTooltip)
             r:SetScript("OnLeave", GameTooltip_Hide)
         end,
         function(r, l)
+            if l.olympus then
+                r.c[1]:SetText(boardName(l.leader, l.class, l.lvl))
+                r.c[2]:SetText((ns.Olympus.HaveQuest(l) and (HAVE_ICON .. " ") or "") .. ns.Olympus.PlaceText(l))
+                r.c[3]:SetText(l.zone or "|cff888888-|r")
+                r.c[4]:SetText(ns.Olympus.NeedsText(l))
+                r.c[5]:SetText(l.note)
+                fillBoardButton(r, l)
+                return
+            end
             r.c[1]:SetText(nameText(l.leader, l.class, l.lvl))
             r.c[2]:SetText((ns.HaveListingQuest(l) and (HAVE_ICON .. " ") or "") .. ns.ListingWhere(l))
             r.c[3]:SetText((l.zone and l.zone ~= "") and l.zone or "|cff888888-|r")
@@ -738,10 +853,28 @@ local function QuestPage(parent)
     p.share = SharePrompt(p.list)
 
     function p:Refresh()
-        self.quest:Refresh()
-        updateCustom()
+        local board = ns.WithOlympus()
+        for _, part in ipairs(self.formParts) do part:SetShown(not board) end
+        self.board:SetShown(board)
+        self.boardNote:SetShown(board)
         self.role:SetValue(MOO_CharDB.role)
         self.zone:Refresh()
+        if board then
+            local z = self.zone.value
+            local data, have = {}, {}
+            for _, l in ipairs(ns.Olympus.Listings({ "QUEST" })) do
+                if z == "ALL" or l.zone == z then
+                    table.insert(ns.Olympus.HaveQuest(l) and have or data, l)
+                end
+            end
+            for i = #have, 1, -1 do table.insert(data, 1, have[i]) end   -- quests I have first
+            self.list:SetData(data, z ~= "ALL" and "No quest groups in that zone on Olympus's Board right now." or
+                "No quest groups on Olympus's Board right now. List one above!")
+            self.share:Hide()
+            return
+        end
+        self.quest:Refresh()
+        updateCustom()
         local mine = myListingRow({ "QUEST" })
         self.post:SetText(mine and "Update" or "List group")
         self.delist:SetShown(mine ~= nil)
@@ -832,11 +965,25 @@ local function PlayersPage(parent)
     if saved.roles then p.roles:SetSelected(saved.roles) end
     saved.picks, saved.roles = p.inst.selected, p.roles.selected
 
+    -- With Olympus's Board: the players looking are its flags, raised on the Board
+    p.flagBtn = Button(p, "Raise a flag", 110, 22, function()
+        local f = p.filter and p.filter.value
+        ns.Olympus.OpenFlagDialog(f and ns.Olympus.KindOfCat(f))
+    end)
+    p.flagBtn:SetPoint("TOPLEFT", 4, -22)
+    p.flagNote = Text(p, "GameFontHighlightSmall")
+    p.flagNote:SetPoint("LEFT", p.flagBtn, "RIGHT", 10, 0)
+    p.flagNote:SetPoint("RIGHT", -4, 0)
+    p.flagNote:SetText("Players looking are the flags on Olympus's Board. This opens Olympus's own flag, so every Olympus player sees yours.")
+    p.formParts = { p.inst, p.roles, noteL, p.note, p.go, p.stop, p.listed }
+
     local lt = Section(p, "Available players")
     lt:SetPoint("TOPLEFT", 4, -88)
     p.filter = Dropdown(p, 200, function()
         local out = { { value = "ALL", label = "Show: everything" } }
-        if ns.myListing then table.insert(out, { value = "MATCH", label = "Show: fits my listing" }) end
+        if ns.myListing or (ns.WithOlympus() and ns.Olympus.MyListing()) then
+            table.insert(out, { value = "MATCH", label = "Show: fits my listing" })
+        end
         for _, c in ipairs(ns.CATEGORIES) do table.insert(out, { value = c.key, label = "Show: " .. c.label }) end
         return out
     end, function() p:Refresh() end)
@@ -865,6 +1012,14 @@ local function PlayersPage(parent)
                 if not a then return end
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                 GameTooltip:AddLine(ns.ClassColor(a.class, ns.ShortName(a.name)) .. "  |cffaaaaaa" .. a.lvl .. "|r")
+                if a.olympus then
+                    if a.guild then GameTooltip:AddLine("Guild: " .. a.guild, 0.4, 1, 0.4) end
+                    GameTooltip:AddLine("Wants: " .. ns.Olympus.WantsText(a), 1, 1, 1)
+                    if a.fits then GameTooltip:AddLine("Fits your listing", 0.2, 1, 0.2) end
+                    GameTooltip:AddLine("From Olympus's Board.", 0.5, 0.5, 0.5)
+                    GameTooltip:Show()
+                    return
+                end
                 GameTooltip:AddLine(ns.GuildTooltipLine(a.name))
                 GameTooltip:AddLine("Wants:", 1, 0.82, 0)
                 for _, name in ipairs(ns.AvailableWhereList(a)) do GameTooltip:AddLine("  " .. name, 1, 1, 1) end
@@ -875,6 +1030,22 @@ local function PlayersPage(parent)
             r:SetScript("OnLeave", GameTooltip_Hide)
         end,
         function(r, a)
+            r.inv:SetScript("OnClick", function() ns.InviteName(a.name) end)
+            r.inv:SetShown(not a.own)
+            if a.olympus then
+                -- a flag on Olympus's Board: invited as the Board's "Invite as" does; gear only
+                -- comes with an application
+                r.inv:SetScript("OnClick", function() ns.Olympus.InviteLooking(a) end)
+                r.c[1]:SetText(boardName(a.name, a.class, a.lvl))
+                r.c[2]:SetText(ns.Olympus.WantsText(a))
+                r.c[3]:SetText(ns.RolesText(a.roles))
+                r.c[4]:SetText(a.own and "|cffaaaaaayour flag|r" or a.fits and "|cff33ff33fits your listing|r" or "")
+                r.c[5]:SetText("")
+                r.gear:Hide()
+                r.you:Hide()
+                return
+            end
+            r.gear:Show()
             r.c[1]:SetText(nameText(a.name, a.class, a.lvl))
             r.c[2]:SetText(ns.AvailableWhereText(a))
             r.c[3]:SetText(ns.RolesText(a.roles))
@@ -887,7 +1058,6 @@ local function PlayersPage(parent)
                 r.you:SetText(st == "live" and (READY_OK .. " (you)") or (READY_WAIT .. " (you)"))
                 return
             end
-            r.inv:SetScript("OnClick", function() ns.InviteName(a.name) end)
             r.gear:SetScript("OnClick", function()
                 if not ns.myListing then
                     ns.Print("List a group first: players share gear only with leaders who have a listing.")
@@ -901,7 +1071,19 @@ local function PlayersPage(parent)
     p.list:SetPoint("RIGHT", -4, 0)
 
     function p:Refresh()
-        self.inst:Refresh(); self.roles:Refresh(); self.filter:Refresh()
+        local board = ns.WithOlympus()
+        for _, part in ipairs(self.formParts) do part:SetShown(not board) end
+        self.flagBtn:SetShown(board)
+        self.flagNote:SetShown(board)
+        s:SetText(board and "Players looking (Olympus's Board)" or "Mark yourself available (leaders can invite you)")
+        self.filter:Refresh()
+        if board then
+            local f = self.filter.value
+            self.list:SetData(ns.Olympus.Looking(f),
+                f == "MATCH" and "Nobody looking fits your listing right now." or "Nobody is looking on the Board right now.")
+            return
+        end
+        self.inst:Refresh(); self.roles:Refresh()
         self.go:SetText(ns.myAvailable and "Update" or "List me")
         self.stop:SetShown(ns.myAvailable ~= nil)
         local f = self.filter.value
@@ -934,6 +1116,12 @@ end
 ------------------------------------------------------------------------
 -- My Group page: applicants + ready check
 ------------------------------------------------------------------------
+-- The category of my listing (MOO's own, or mine on Olympus's Board).
+local function myListingCat()
+    local l = ns.WithOlympus() and ns.Olympus.MyListing() or ns.myListing
+    return l and l.cat
+end
+
 local function MyGroupPage(parent)
     local p = CreateFrame("Frame", nil, parent)
     p:SetAllPoints()
@@ -946,6 +1134,14 @@ local function MyGroupPage(parent)
     p.t = Stepper(p, "Tank", 0, pushNeeds);   p.t:SetPoint("RIGHT", p.h, "LEFT", -10, 0)
     p.q = Stepper(p, "Players", 0, function() ns.UpdateNeeds(0, 0, p.q.value) end)
     p.q:SetPoint("TOPRIGHT", -4, -2)
+    -- With Olympus's Board, the needs are changed in Olympus's own listing dialog
+    p.edit = Button(p, "Edit listing", 100, 20, function()
+        local l = ns.Olympus.MyListing()
+        ns.Olympus.OpenListingDialog(l and l.kind)
+    end)
+    p.edit:SetPoint("TOPRIGHT", -4, -2)
+    p.lower = Button(p, "Delist", 64, 20, function() ns.Olympus.LowerListing() end)
+    p.lower:SetPoint("RIGHT", p.edit, "LEFT", -4, 0)
 
     local hdr = CreateFrame("Frame", nil, p)
     hdr:SetPoint("TOPLEFT", 4, -28); hdr:SetPoint("RIGHT", -4, 0); hdr:SetHeight(14)
@@ -973,17 +1169,18 @@ local function MyGroupPage(parent)
                 if not self.item then return end
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                 GameTooltip:AddLine(ns.ShortName(self.item.name))
-                GameTooltip:AddLine(ns.GuildTooltipLine(self.item.name))
+                if self.item.olympus then GameTooltip:AddLine("Applied on Olympus's Board", 0.4, 1, 0.4)
+                else GameTooltip:AddLine(ns.GuildTooltipLine(self.item.name)) end
                 if self.item.note ~= "" then GameTooltip:AddLine(self.item.note, 1, 1, 1, true) end
                 GameTooltip:Show()
             end)
             r:SetScript("OnLeave", GameTooltip_Hide)
         end,
         function(r, a)
-            r.c[1]:SetText(nameText(a.name, a.class, a.lvl))
+            r.c[1]:SetText((a.olympus and boardName or nameText)(a.name, a.class, a.lvl))
             r.c[2]:SetText(ns.RoleText(a.role))
             r.c[3]:SetText(a.ilvl > 0 and a.ilvl or "-")
-            local wpvp = ns.myListing and noRatings(ns.myListing.cat)
+            local wpvp = noRatings(myListingCat())
             r.c[4]:SetText(wpvp and "|cff888888-|r" or ns.RatingSummary(a.name, a.role))
             r.c[5]:SetText(ns.GearStatusText(ns.gearSeen[a.name]))
             local stateText = { invited = "|cffffd100invited|r", joined = "|cff33ff33joined|r", declined = "|cff888888declined|r" }
@@ -1028,7 +1225,7 @@ local function MyGroupPage(parent)
             if not m.online then n = n .. " |cff888888(offline)|r" end
             r.c[2]:SetText(n)
             r.c[3]:SetText(m.role and ns.RoleText(m.role) or "|cff888888?|r")
-            local wpvp = ns.myListing and noRatings(ns.myListing.cat)
+            local wpvp = noRatings(myListingCat())
             r.c[4]:SetText(wpvp and "|cff888888-|r" or ns.RatingSummary(m.name, m.role))
             local g = ns.gearSeen[m.name]
             r.c[5]:SetText(g and ns.GearStatusText(g) or "")
@@ -1038,14 +1235,24 @@ local function MyGroupPage(parent)
     p.roster:SetPoint("RIGHT", -4, 0)
 
     function p:Refresh()
-        local l = ns.myListing
-        if l then
+        local board = ns.WithOlympus()
+        local l = board and ns.Olympus.MyListing() or ns.myListing
+        if board then
+            -- Olympus plays its own sound for applicants
+            self.t:Hide(); self.h:Hide(); self.d:Hide(); self.q:Hide(); self.sound:Hide()
+            self.edit:SetShown(l ~= nil); self.lower:SetShown(l ~= nil)
+            self.status:SetText(l and ("Your listing on Olympus's Board: |cffffffff" .. ns.Olympus.PlaceText(l) ..
+                "|r   still need: " .. ns.Olympus.NeedsText(l))
+                or "You have no listing on Olympus's Board. List a group from Dungeons, Raids, PvP or Quests.")
+        elseif l then
+            self.edit:Hide(); self.lower:Hide(); self.sound:Show()
             self.status:SetText("Your listing: |cffffffff" .. ns.ListingWhere(l) .. "|r   still need:")
             local quest = (l.cat == "QUEST")
             self.t:Set(l.t); self.h:Set(l.h); self.d:Set(l.d); self.q:Set(l.d)
             self.t:SetShown(not quest); self.h:SetShown(not quest); self.d:SetShown(not quest)
             self.q:SetShown(quest)
         else
+            self.edit:Hide(); self.lower:Hide(); self.sound:Show()
             self.status:SetText("You have no listing. List a group from Dungeons, Raids, PvP or Quests.")
             self.t:Hide(); self.h:Hide(); self.d:Hide(); self.q:Hide()
         end
@@ -1063,6 +1270,7 @@ local function MyGroupPage(parent)
     end
     return p
 end
+ns.UI.MyGroupPage = MyGroupPage   -- also the Board's panel, with Olympus (Olympus.lua)
 
 ------------------------------------------------------------------------
 -- Ratings page
@@ -1164,7 +1372,9 @@ local function OptInOverlay(parent)
         elseif not ns.IsOptedIn() then
             self.title:SetText("Welcome to Muster Of Olympus")
             self.body:SetText(
-                "To list groups, apply, or mark yourself available, you opt in to ratings:\n\n" ..
+                (ns.WithOlympus() and "Groups are on Olympus's Board. To share your gear and rating when you apply there, " ..
+                    "and to be rated, you opt in to ratings:\n\n"
+                    or "To list groups, apply, or mark yourself available, you opt in to ratings:\n\n") ..
                 "- After a dungeon or raid, groupmates who also use MOO can give you 1-5 stars and positive tags for the role you played.\n" ..
                 "- A rating only counts if you were really grouped together (both your addons confirm it).\n" ..
                 "- Scores show only once 3 different players have rated you in a role.\n" ..
@@ -1238,7 +1448,10 @@ local function makeMain()
     f.content = content
 
     -- Olympus link in the header
-    f.oly = Button(f, "Olympus", 80, 20, ns.OpenOlympus)
+    -- (While MOO's line on Olympus's privacy page waits for an answer, it opens that page.)
+    f.oly = Button(f, "Olympus", 80, 20, function()
+        if ns.Olympus and ns.Olympus.AwaitingAnswer() then ns.OpenOlympus("privacy") else ns.OpenOlympus() end
+    end)
     f.oly:SetPoint("TOPRIGHT", -30, -32)
     f.themeBtn = Button(f, "Dark mode", 86, 20, function()
         ns.SetTheme(ns.IsDark() and "classic" or "dark")
@@ -1290,12 +1503,17 @@ function ns.RefreshUI()
     if not main or not main:IsShown() then return end
     main.overlay:Refresh()
     local cross
-    if not ns.CROSS_GUILD then cross = "|cffaaaaaaYour guild only|r"
+    if ns.WithOlympus() then cross = "|cff33ff33Groups: Olympus's Board|r"
+    elseif not ns.CROSS_GUILD then cross = "|cffaaaaaaYour guild only|r"
     elseif ns.CrossGuildOn() then
         cross = MOO_DB.channelKey and "|cff33ff33Cross-guild: on (sealed)|r" or "|cff33ff33Cross-guild: on|r"
     else cross = "|cffffaa00Your guild only (no officer key)|r" end
-    local oly = ns.OlympusAddonLoaded() and "|cff33ff33Olympus addon loaded|r" or "|cffffaa00Olympus addon not found|r"
+    local awaiting = ns.Olympus and ns.Olympus.AwaitingAnswer()
+    local oly = awaiting and "|cffffaa00Olympus: answer MOO's line to use its Board|r"
+        or ns.OlympusAddonLoaded() and "|cff33ff33Olympus addon loaded|r" or "|cffffaa00Olympus addon not found|r"
     main.status:SetText(cross .. "   " .. oly)
+    main.oly:SetText(awaiting and "Link Olympus" or "Olympus")
+    main.oly:SetWidth(awaiting and 100 or 80)
     main.oly:SetShown(ns.OlympusAddonLoaded())
     main.themeBtn:SetText(ns.IsDark() and "Classic" or "Dark mode")
     local newer = ns.UpdateAvailable and ns.UpdateAvailable()
@@ -1321,9 +1539,13 @@ end
 for _, ev in ipairs({ "LISTINGS_UPDATED", "APPLICANTS_UPDATED", "GROUP_INFO", "STATE_CHANGED",
                       "READY_CHECK_UPDATED", "RATINGS_UPDATED", "GEAR_UPDATED", "INSTANCES_CHANGED",
                       "COACH_UPDATED", "QUESTS_CHANGED" }) do
-    ns.Listen(ev, function() ns.RefreshUI(); if ns.RefreshDetail then ns.RefreshDetail() end end)
+    ns.Listen(ev, function()
+        ns.RefreshUI()
+        if ns.RefreshDetail then ns.RefreshDetail() end
+        ns.Olympus.RefreshPanel()
+    end)
 end
-ns.On("GROUP_ROSTER_UPDATE", function() ns.RefreshUI() end)
+ns.On("GROUP_ROSTER_UPDATE", function() ns.RefreshUI(); ns.Olympus.RefreshPanel() end)
 ns.Listen("APPLICANTS_UPDATED", function()
     -- jump to My Group when the first applicant arrives while the window is open
     local i = ns.TabIndex("mygroup")

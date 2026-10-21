@@ -7,6 +7,8 @@
 --   custom name), plus its name and zone, and take themselves down after 20 minutes.
 -- * Every invite comes from the leader clicking Invite. MOO never invites, accepts,
 --   queues or joins anything by itself.
+-- * With Olympus's Board (Olympus.lua), the listings, flags and applications are Olympus's:
+--   nothing here goes out, and Invite and Decline go through Olympus.
 
 local _, ns = ...
 
@@ -52,7 +54,7 @@ end
 
 local function sendListing()
     local l = ns.myListing
-    if not l then return end
+    if not l or ns.WithOlympus() then return end
     if l.cat == "QUEST" then
         ns.Send("NET", { "L", l.id, l.cat, l.inst, l.t, l.h, l.d, l.min, myLevel(), myClass(), l.note, l.qname, l.zone })
     else
@@ -97,6 +99,7 @@ end
 
 -- quest (QUEST only): { qname =, zone = }
 function ns.PostListing(cat, inst, t, h, d, minLvl, note, quest)
+    if ns.WithOlympus() then ns.Olympus.OpenListingDialog(ns.Olympus.KindOfCat(cat)) return end
     if not ns.RequireReady("list a group") then return end
     if cat == "QUEST" then
         if type(inst) ~= "string" or not inst:match("^Q%d+$") or #inst > 12 then return end
@@ -136,7 +139,7 @@ end
 
 function ns.UpdateNeeds(t, h, d)
     local l = ns.myListing
-    if not l then return end
+    if not l or ns.WithOlympus() then return end
     l.t, l.h, l.d = math.max(0, t), math.max(0, h), math.max(0, d)
     sendListing()
     ns.Fire("LISTINGS_UPDATED")
@@ -159,6 +162,7 @@ local function validId(id)
 end
 
 ns.Handle("L", function(sender, f)
+    if ns.WithOlympus() then return end
     local id, cat, inst = f[2], ns.ValidCat(f[3]), f[4]
     if not validId(id) or not cat or not validId(inst) then return end
     local qid, qname, zone
@@ -190,6 +194,7 @@ ns.listingMembers = {}   -- [leader] = { id=, list = { {name, role, class}, ... 
 local MAX_MEMBERS = 40
 
 ns.Handle("LM", function(sender, f)
+    if ns.WithOlympus() then return end
     local id, seq, list = f[2], ns.Clamp(f[3], 1, 20, nil), f[4]
     if not validId(id) or not seq or not list then return end
     local l = ns.listings[sender]
@@ -302,7 +307,7 @@ end
 
 local function sendAvailable()
     local a = ns.myAvailable
-    if not a then return end
+    if not a or ns.WithOlympus() then return end
     local first = a.cats[1]
     local allKeys, others = {}, {}
     for i, c in ipairs(a.cats) do
@@ -324,6 +329,7 @@ end
 
 -- values: instance keys and "ANY:<CAT>"; roles: list of roles
 function ns.SetAvailable(values, roles, note)
+    if ns.WithOlympus() then ns.Print("Raise your flag on Olympus's Board: that's where leaders look.") return end
     if not ns.RequireReady("mark yourself available") then return end
     local picks, cats = ns.PicksFromValues(values)
     if #cats == 0 then picks, cats = { DUNGEON = { "ANY" } }, { "DUNGEON" } end
@@ -374,6 +380,7 @@ function ns.ClearAvailable(silent)
 end
 
 ns.Handle("W", function(sender, f)
+    if ns.WithOlympus() then return end
     local first = ns.ValidCat(f[2])
     if not first then return end
     for entry in (f[8] or ""):gmatch("[^;]+") do
@@ -479,6 +486,7 @@ end)
 -- Applying
 ------------------------------------------------------------------------
 function ns.Apply(leader, role, note)
+    if ns.WithOlympus() then return end   -- applications are Olympus's (its card's Apply)
     if not ns.RequireReady("apply") then return end
     local l = ns.listings[leader]
     if not l then ns.Print("That listing is gone.") return end
@@ -528,7 +536,7 @@ end)
 
 ns.Handle("JC", function(sender, f)
     local a = ns.applicants[sender]
-    if a and a.id == f[2] then
+    if a and not a.olympus and a.id == f[2] then
         ns.applicants[sender] = nil
         ns.Fire("APPLICANTS_UPDATED")
     end
@@ -565,6 +573,7 @@ function ns.InviteName(name)
 end
 
 function ns.InviteApplicant(name)
+    if ns.WithOlympus() then return ns.Olympus.InviteApplicant(name) end
     local a = ns.applicants[name]
     ns.InviteName(name)
     if a then
@@ -575,6 +584,7 @@ function ns.InviteApplicant(name)
 end
 
 function ns.DeclineApplicant(name)
+    if ns.WithOlympus() then return ns.Olympus.DeclineApplicant(name) end
     local a = ns.applicants[name]
     if not a then return end
     a.state = "declined"

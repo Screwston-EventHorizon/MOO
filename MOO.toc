@@ -10,6 +10,7 @@
 ## X-License: MIT
 
 Core.lua
+Olympus.lua
 Theme.lua
 Data.lua
 Comm.lua

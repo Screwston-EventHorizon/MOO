@@ -57,6 +57,19 @@ Ratings stay private and travel only where they're needed. There's no shared dat
 - **Other players' guilds are checked when the game shows them.** When a player is in your group, targeted, moused over or on a nameplate, MOO remembers their guild. Players seen in a non-Olympus guild are marked "(not Olympus)" and their messages are ignored; players MOO hasn't seen yet are marked "(unverified)". Hover a name for details.
 - **The Olympus addon is recommended** (optional dependency). MOO keeps working if it's missing or changes; when it's loaded, the MOO window has a button to open it.
 
+## With the Olympus addon
+
+The Olympus addon has its own group finder on its Board. When an Olympus version with its group API is installed, MOO can work as the heavier layer on top of it instead of running a second group finder next to it. Everyone with Olympus then sees every group, whether they run MOO or not.
+
+- **You choose.** MOO's line appears on Olympus's privacy page (`/oly privacy`). Until you answer, and after a No, MOO works on its own exactly as described above.
+- **After a Yes:**
+  - Groups and players looking come from Olympus's Board, and MOO shows them on its Dungeons, Raids, PvP, Quests and Players tabs (quest groups for a quest in your own log come first, marked, and the zone filter works on the Board's quest groups too). "List a group" and "Apply" open Olympus's own dialog and group card, so you apply there yourself. MOO sends no listings or "available" flags of its own and stays off its hidden channel. "Raise a flag" on the Players tab opens Olympus's own flag, and "Invite" there invites a player looking as a role your listing needs, the way the Board does.
+  - MOO's My Group panel (applicants with gear, iLvl and rating, your roster, the ready check) appears in the Board's "Your group" area. A switch above it ("Olympus's own") brings Olympus's own panel back at any time. Invite, Decline and Delist go through Olympus; to change what your listing needs, "Edit listing" opens Olympus's dialog.
+  - MOO takes your Olympus membership from Olympus instead of checking your guild's name.
+  - Gear, stats and your rating summary still go only by MOO whisper, and only to a leader who also runs MOO, after you applied to their listing on the Board.
+  - Ratings, the Coach, the ready check and the Feedback tab work as always.
+- `/moo status` shows whether MOO is working with the Board or on its own, and why.
+
 ## Commands
 
 `/moo` is shared with the game's own `/moo` emote, on purpose. Plain `/moo` (or `/moo PlayerName`) still moos, like always. `/moo` followed by a MOO command runs the addon. Anything that isn't a MOO command moos, so if you forget a command, you moo at someone.
@@ -100,7 +113,7 @@ Players whose character is literally named after a command (e.g. "Rate") can't b
 - **No combat data.** MOO reads no combat logs, damage, healing, health or cooldowns. Ratings are opinions from people, not calculations. Gear and stats are your own character's, read out of combat.
 - **Respects Forever's addon restrictions.** MOO sends nothing from inside a dungeon, raid or battleground. Messages wait until you're out, and the rating window only opens outside instances. API values the game marks "secret" are skipped.
 - **Light on the servers.** MOO sends at most one message every 1.2 seconds. Listings repeat every 90 seconds. Each client resends only its own ratings, 8 records every 10 minutes.
-- **Privacy.** Gear goes only to a leader you apply to, or to a leader with an open listing while you're marked available. Nothing leaves the game, and there's no website or server.
+- **Privacy.** Gear goes only to a leader you apply to, or to a leader with an open listing while you're marked available (with Olympus's Board: only to a leader running MOO whose listing you applied to). Nothing leaves the game, and there's no website or server.
 - **Typed text is reportable.** Notes on listings, availability and applications (and the names of instances MOO added) go through Blizzard's logged addon-message API, which Blizzard asks addons to use for player-written text so abuse can be reported under the Code of Conduct.
 - **Positive tags only.** This keeps the rating system from becoming a harassment tool, in line with Blizzard's Code of Conduct and CurseForge's content policies.
 
