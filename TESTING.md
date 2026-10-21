@@ -7,11 +7,12 @@ Testers from **different Olympus guilds** are especially useful: MOO connects al
 Note: the Forever beta sometimes forgets addon data at login, so ratings may reset between sessions. Test ratings within one play session.
 
 ## Solo (5 minutes)
-- [ ] `/mooo` opens the window; all 7 tabs load; the header says "Cross-guild: on"
-- [ ] Dropdowns open and pick correctly (Dungeons, Raids, PvP, Players, Feedback)
+- [ ] "Tell my guild" (header, or under an empty list) opens a preview; "Post to guild chat" posts it once, then the button stays disabled with a countdown
+- [ ] `/mooo` opens the window; all 9 tabs load; the header says "Cross-guild: on"
+- [ ] Dropdowns open and pick correctly (Dungeons, Raids, PvP, Quests, Players, Feedback)
 - [ ] Minimap button sits on the ring; left-click opens, right-click opens My Group; `/moo minimap` hides it
 - [ ] Plain `/moo` still moos (and `/moo Name` moos at them); `/moo help` lists commands
-- [ ] The Olympus button opens Olympus (if you have it)
+- [ ] The Olympus button opens Olympus (if you have it), with no "Couldn't open Olympus" message
 - [ ] `/moo status` says you're in an Olympus guild and the channel is joined
 - [ ] Opt in from the welcome screen
 
@@ -26,9 +27,21 @@ Note: the Forever beta sometimes forgets addon data at login, so ratings may res
 - [ ] Apply; the leader hears a sound and sees you in My Group with gear and stats
 - [ ] Invite, Decline and Cancel all work; your button updates
 - [ ] World PvP listings show no ratings anywhere
+- [ ] Your own listing shows at the top of its tab as "(your group)", with no Apply button; Delist removes it
+
+## Group quests (2+ people)
+- [ ] Quests tab: the quest dropdown lists your quest log, Group/Elite quests first; "Custom name..." shows a name box
+- [ ] List a quest group; others see the quest, zone and players needed
+- [ ] Someone who has the same quest sees a check mark and the listing at the top; the zone filter works
+- [ ] A custom-name listing shows its name, with no check mark
+- [ ] Apply / Invite work as for dungeons; My Group shows a "Players" stepper for a quest listing
+- [ ] After 20 minutes the quest listing comes down by itself with a chat message
 
 ## Players tab (2+ people)
 - [ ] List yourself for several dungeons and several roles
+- [ ] List yourself for dungeons AND PvP (e.g. 2 dungeons + Any World PvP): others see both; "Show: Dungeons" and "Show: World PvP" both include you
+- [ ] Picking "Any dungeon" clears your specific dungeons but keeps your PvP picks
+- [ ] After "List me": you show at the top of Available players as "(you)" (no Invite/Gear), the top-right line goes from "Sending..." to a green check "You're listed", and chat says so once
 - [ ] A leader with a listing sees you, can filter "fits my listing", and can Invite you
 - [ ] Joining a group while listed in 2+ roles reminds you to set your role
 
@@ -48,6 +61,10 @@ Note: the Forever beta sometimes forgets addon data at login, so ratings may res
 - [ ] `/moo key <secret>` seals the channel; guildmates get the key automatically
 - [ ] Officers of another guild set the same secret: you still see each other
 - [ ] `/moo key clear` goes back to the open channel
+
+## Update notice (author + 1)
+- [ ] Author: `/moo release <a version newer than the tester's>`; the tester gets one chat line and "Update available" in the window title
+- [ ] Tester relogs while the author is offline: still told (the notice was remembered and repeated)
 
 ## Feedback
 - [ ] Feedback tab: pick a type, write something, Send. It says "Sent" and shows "delivered" once the author has it

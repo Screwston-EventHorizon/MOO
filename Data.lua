@@ -9,6 +9,7 @@ ns.CATEGORIES = {
     { key = "RAID",    label = "Raids" },
     { key = "BG",      label = "Battlegrounds" },
     { key = "WPVP",    label = "World PvP" },
+    { key = "QUEST",   label = "Group Quests" },
 }
 
 ns.INSTANCES = {
@@ -248,6 +249,7 @@ function ns.InstanceName(key)
     local i = ns.INSTANCE_BY_KEY[key]
     if i then return i.name end
     if ns.remoteInstanceNames[key] then return ns.remoteInstanceNames[key] end
+    if type(key) == "string" and key:match("^Q%d+$") then return "Group quest" end
     local id = type(key) == "string" and (key:match("^C(%d+)$") or key:match("^I(%d+)$"))
     return id and ("Instance " .. id) or "Unknown instance"
 end

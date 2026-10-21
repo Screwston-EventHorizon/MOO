@@ -2,7 +2,7 @@
 ## Title: Muster Of Olympus |cff8888ff(MOO)|r
 ## Notes: Group finder, ready check and player ratings for Olympus guilds. Fan project, not affiliated with Blizzard, Asmongold or the Olympus leadership.
 ## Author: MOO contributors
-## Version: 0.11.0-alpha
+## Version: 0.12.0-alpha
 ## OptionalDeps: Olympus
 ## SavedVariables: MOO_DB
 ## SavedVariablesPerCharacter: MOO_CharDB
@@ -18,9 +18,12 @@ Gear.lua
 Ratings.lua
 Coach.lua
 Groups.lua
+Quests.lua
 ReadyCheck.lua
 UI.lua
+Share.lua
 UI_Rating.lua
 UI_Coach.lua
 Recruit.lua
+Version.lua
 Feedback.lua

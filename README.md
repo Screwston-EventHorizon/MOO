@@ -8,9 +8,11 @@ A group finder, ready check and player rating system for **Olympus guilds** in *
 
 ## What it does
 
-**Group finder (Dungeons, Raids, PvP).** List a group by picking the instance from a dropdown, setting how many Tanks, Healers and DPS you still need, a minimum level and a short note. Other Olympus players see it across every Olympus guild on the realm. Hover a listing to see who's in the group, or click it to open the group card. Battlegrounds and World PvP use the same finder, but **World PvP has no ratings** anywhere.
+**Group finder (Dungeons, Raids, PvP).** List a group by picking the instance from a dropdown, setting how many Tanks, Healers and DPS you still need, a minimum level and a short note. Other Olympus players see it across every Olympus guild on the realm. Hover a listing to see who's in the group, or click it to open the group card. Battlegrounds and World PvP use the same finder, but **World PvP has no ratings** anywhere. Your own listing sits at the top of its list, marked *(your group)*, so you can see it really went out.
 
-**Players tab.** Mark yourself available for several dungeons, raids or battlegrounds at once (up to 12, or "Anything"), in every role you can play (e.g. Tank and Healer for a Druid or Paladin). Leaders see what you want and which roles you play, can filter to "fits my listing", and click **Invite**. When you join a group while listed in more than one role, MOO reminds you to set the role you'll play, since that's the role you're rated in.
+**Quests tab.** Find help with group quests. Pick a quest from your own quest log (Group and Elite quests come first, and the zone fills itself in) or type a custom name for an elite, a rare or anything else, then set how many players you need. Listings for quests you also have are marked with a check and shown first, and you can filter the list by zone. Quest listings come down by themselves after 20 minutes; list again to keep yours up.
+
+**Players tab.** Mark yourself available for anything MOO lists, across categories, in one go: e.g. three dungeons plus "Any World PvP" (up to 12 picks; each category also has an "Any" option), in every role you can play (e.g. Tank and Healer for a Druid or Paladin). Leaders see what you want and which roles you play, can filter to "fits my listing", and click **Invite**. Once your availability has really gone out, you see yourself at the top of the list marked *(you)* with a green check, and a "You're listed" line at the top of the tab. When you join a group while listed in more than one role, MOO reminds you to set the role you'll play, since that's the role you're rated in.
 
 **Applications with gear and stats.** When you apply, your addon sends the leader (and only the leader) your equipped items and basic stats. The leader sees item names with real tooltips, average item level, and stats like Str, Agi, Sta, Int, crit and spell power. Gear is marked *self-reported* until you join the group and stand near the leader. MOO then inspects you once and marks it *verified* or *changed*.
 
@@ -28,6 +30,10 @@ A group finder, ready check and player rating system for **Olympus guilds** in *
 - **How-to guides:** every tip has a "How to" button, e.g. how to mark targets, what each marker usually means, pulling, threat, mana, dispels, crowd control and loot etiquette. `/moo guide marking` opens one directly.
 
 Rating feedback unlocks after 3 different players rate you in a role, so you can't tell which groupmate rated you low.
+
+**Update notices.** When a newer MOO is out on CurseForge, MOO tells you once per session in chat and in the window title. Only releases the author has marked count, so test builds never trigger it.
+
+**Tell my guild.** A button in the window header (and under any empty group list) shows a short line about MOO and a link, and posts it to your guild chat only when you click "Post to guild chat". Once every 3 hours per character.
 
 **Feedback tab.** Send a bug report, idea or comment to MOO's author from inside the game. It's delivered when the author is next online and saved on the author's computer.
 
@@ -64,6 +70,8 @@ Ratings stay private and travel only where they're needed. There's no shared dat
 | `/moo rc` | start a ready check (leader or raid assistant) |
 | `/moo rate` | reopen the rating window for your last run |
 | `/moo who Name` | show a player's ratings |
+| `/moo quests` | open the Quests tab (group quests) |
+| `/moo share` | tell your guild about MOO (same as the "Tell my guild" button) |
 | `/moo coach` | open the Coach tab (tips for your role) |
 | `/moo feedback` | send feedback to MOO's author |
 | `/moo guide <topic>` | open a how-to guide (e.g. marking, pulling, mana) |
@@ -81,6 +89,7 @@ Ratings stay private and travel only where they're needed. There's no shared dat
 | `/moo recruit link <link>` | the download link the reply sends |
 | `/moo recruit message <text>` | your own reply text (`{link}` marks where the link goes) |
 | `/moo recruit list` | everyone who asked and when you replied, in a copy window |
+| `/moo release <version>` / `off` | (author only) once a version is live on CurseForge, tell older MOOs to update |
 
 Players whose character is literally named after a command (e.g. "Rate") can't be mooed at by name. Left-click the minimap button to open MOO; right-click it for My Group and the ready check.
 

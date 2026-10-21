@@ -318,5 +318,5 @@ local function FeedbackSendPage(parent)
 end
 
 ns.EXTRA_TABS = ns.EXTRA_TABS or {}
-table.insert(ns.EXTRA_TABS, { label = "Feedback", build = FeedbackSendPage })
+table.insert(ns.EXTRA_TABS, { key = "feedback", label = "Feedback", build = FeedbackSendPage })
 ns.Listen("FEEDBACK_UPDATED", function() if ns.RefreshUI then ns.RefreshUI() end end)

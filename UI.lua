@@ -149,8 +149,9 @@ local function Dropdown(parent, w, getItems, onChange)
     return dd
 end
 
--- Dropdown with checkboxes (pick several). Items: { value=, label=, exclusive=true }.
+-- Dropdown with checkboxes (pick several). Items: { value=, label=, exclusive=true, group= }.
 -- An "exclusive" item (like "Anything") clears the others, and picking another clears it.
+-- With group= set, that only applies within the group (e.g. "Any dungeon" vs dungeons).
 -- dd.selected is a set { [value] = true }; onChange(selected) fires on every change.
 local function MultiDropdown(parent, w, getItems, onChange, opts)
     opts = opts or {}
@@ -171,24 +172,29 @@ local function MultiDropdown(parent, w, getItems, onChange, opts)
 
     local function toggle(v)
         local items = getItems()
-        local exclusive, count = false, 0
+        local target, count = nil, 0
         for _, it in ipairs(items) do
-            if it.value == v then exclusive = it.exclusive end
-            if dd.selected[it.value] then count = count + 1 end
+            if not it.header then
+                if it.value == v then target = it end
+                if dd.selected[it.value] then count = count + 1 end
+            end
         end
+        if not target then return end
         if dd.selected[v] then
             dd.selected[v] = nil
         else
-            if exclusive then
-                wipe(dd.selected)
-            else
-                for _, it in ipairs(items) do
-                    if it.exclusive and dd.selected[it.value] then dd.selected[it.value] = nil; count = count - 1 end
+            local g = target.group
+            for _, it in ipairs(items) do
+                local sameGroup = (g == nil) or (it.group == g)
+                -- an exclusive pick clears its group; any other pick clears its group's exclusive item
+                if not it.header and dd.selected[it.value] and sameGroup and (target.exclusive or it.exclusive) then
+                    dd.selected[it.value] = nil
+                    count = count - 1
                 end
-                if opts.max and count >= opts.max then
-                    ns.Print("You can pick up to " .. opts.max .. ".")
-                    return
-                end
+            end
+            if opts.max and count >= opts.max then
+                ns.Print("You can pick up to " .. opts.max .. ".")
+                return
             end
             dd.selected[v] = true
         end
@@ -397,6 +403,94 @@ end
 
 local function noRatings(cat) return cat == "WPVP" end
 
+local HAVE_ICON = "|TInterface\\RaidFrame\\ReadyCheck-Ready:12|t"
+local READY_OK = HAVE_ICON
+local READY_WAIT = "|TInterface\\RaidFrame\\ReadyCheck-Waiting:12|t"
+
+-- Your own listing, ready to show at the top of a list, if it belongs to one of cats.
+local function myListingRow(cats)
+    local mine = ns.myListing
+    if not mine then return nil end
+    for _, c in ipairs(cats) do
+        if mine.cat == c then
+            mine.leader = ns.Me()
+            mine.class = select(2, UnitClass("player"))
+            mine.lvl = UnitLevel("player")
+            return mine
+        end
+    end
+end
+
+local function listingTooltip(self)
+    local l = self.item
+    if not l then return end
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:AddLine(ns.ShortName(l.leader) .. "'s group - " .. ns.ListingWhere(l))
+    GameTooltip:AddLine(ns.GuildTooltipLine(l.leader))
+    if l.cat == "QUEST" then
+        if l.zone and l.zone ~= "" then GameTooltip:AddLine("Zone: " .. l.zone, 1, 1, 1) end
+        if ns.HaveListingQuest(l) then
+            GameTooltip:AddLine(HAVE_ICON .. " You have this quest", 0.4, 1, 0.4)
+        elseif (l.qid or 0) == 0 then
+            GameTooltip:AddLine("Custom name, not a quest from the log", 0.7, 0.7, 0.7)
+        end
+    end
+    if l.note ~= "" then GameTooltip:AddLine(l.note, 1, 1, 1, true) end
+    GameTooltip:AddLine("Min level " .. l.min, 0.7, 0.7, 0.7)
+    GameTooltip:AddLine(" ")
+    for _, m in ipairs(ns.ListingMembers(l)) do
+        GameTooltip:AddLine(ns.ClassColor(m.class, ns.ShortName(m.name)) .. ns.GuildMark(m.name) ..
+            (m.role and ("  " .. ns.RoleText(m.role)) or ""))
+    end
+    if l == ns.myListing then GameTooltip:AddLine("This is your listing.", 1, 0.82, 0) end
+    GameTooltip:AddLine("Click to see the whole group.", 0.5, 0.5, 0.5)
+    GameTooltip:Show()
+end
+
+-- Under an empty listing list: a nudge to tell your guild about MOO.
+local function SharePrompt(list)
+    local f = CreateFrame("Frame", nil, list)
+    f:SetSize(420, 52)
+    f:SetPoint("TOP", list.empty, "BOTTOM", 0, -14)
+    local t = Text(f, "GameFontNormalSmall", "CENTER")
+    t:SetPoint("TOP")
+    t:SetText("Not many people here yet? Tell your guild about MOO.")
+    local b = Button(f, "Tell my guild", 110, 22, function() ns.ShowShare() end)
+    b:SetPoint("TOP", t, "BOTTOM", 0, -6)
+    f:Hide()
+    return f
+end
+
+-- Apply button on a listing row, or "(your group)" on your own listing.
+local function buildListingButton(r)
+    r.btn = Button(r, "Apply", 64, 20)
+    r.btn:SetPoint("RIGHT", -2, 0)
+    r.mine = Text(r, "GameFontNormalSmall", "RIGHT")
+    r.mine:SetPoint("RIGHT", -6, 0)
+    r.mine:SetText("(your group)")
+    r.mine:Hide()
+end
+
+local function fillListingButton(r, l)
+    local isMine = (l == ns.myListing)
+    r.mine:SetShown(isMine)
+    r.btn:SetShown(not isMine)
+    if isMine then return end
+    local app = ns.myApplications[l.leader]
+    r.btn:Enable()
+    if app and app.id == l.id and app.state == "sent" then
+        r.btn:SetText("Cancel")
+        r.btn:SetScript("OnClick", function() ns.CancelApplication(l.leader) end)
+    elseif app and app.id == l.id and app.state ~= "closed" then
+        r.btn:SetText(app.state == "invited" and "Invited" or "Declined")
+        r.btn:Disable()
+    else
+        r.btn:SetText("Apply")
+        r.btn:SetScript("OnClick", function() ns.Apply(l.leader, MOO_CharDB.role, "") end)
+        if UnitLevel("player") < l.min then r.btn:Disable() end
+    end
+end
+
 local function GroupPage(parent, cats, title)
     local p = CreateFrame("Frame", nil, parent)
     p:SetAllPoints()
@@ -464,25 +558,9 @@ local function GroupPage(parent, cats, title)
             end
             r.c[2]:SetWidth(165)
             r.c[5]:SetWidth(130)
-            r.btn = Button(r, "Apply", 64, 20)
-            r.btn:SetPoint("RIGHT", -2, 0)
+            buildListingButton(r)
             r:SetScript("OnClick", function(self) if self.item then ns.ShowGroup(self.item.leader) end end)
-            r:SetScript("OnEnter", function(self)
-                local l = self.item
-                if not l then return end
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:AddLine(ns.ShortName(l.leader) .. "'s group - " .. ns.InstanceName(l.inst))
-                GameTooltip:AddLine(ns.GuildTooltipLine(l.leader))
-                if l.note ~= "" then GameTooltip:AddLine(l.note, 1, 1, 1, true) end
-                GameTooltip:AddLine("Min level " .. l.min, 0.7, 0.7, 0.7)
-                GameTooltip:AddLine(" ")
-                for _, m in ipairs(ns.ListingMembers(l)) do
-                    GameTooltip:AddLine(ns.ClassColor(m.class, ns.ShortName(m.name)) .. ns.GuildMark(m.name) ..
-                        (m.role and ("  " .. ns.RoleText(m.role)) or ""))
-                end
-                GameTooltip:AddLine("Click to see the whole group.", 0.5, 0.5, 0.5)
-                GameTooltip:Show()
-            end)
+            r:SetScript("OnEnter", listingTooltip)
             r:SetScript("OnLeave", GameTooltip_Hide)
         end,
         function(r, l)
@@ -492,38 +570,188 @@ local function GroupPage(parent, cats, title)
             local n = #ns.ListingMembers(l)
             r.c[4]:SetText("|cffaaaaaa" .. n .. (n == 1 and " player" or " players") .. "|r")
             r.c[5]:SetText(l.note)
-            local app = ns.myApplications[l.leader]
-            r.btn:Enable()
-            if app and app.id == l.id and app.state == "sent" then
-                r.btn:SetText("Cancel")
-                r.btn:SetScript("OnClick", function() ns.CancelApplication(l.leader) end)
-            elseif app and app.id == l.id and app.state ~= "closed" then
-                r.btn:SetText(app.state == "invited" and "Invited" or "Declined")
-                r.btn:Disable()
-            else
-                r.btn:SetText("Apply")
-                r.btn:SetScript("OnClick", function() ns.Apply(l.leader, MOO_CharDB.role, "") end)
-                if UnitLevel("player") < l.min then r.btn:Disable() end
-            end
+            fillListingButton(r, l)
         end)
     p.list:SetPoint("TOPLEFT", 4, -122)
     p.list:SetPoint("RIGHT", -4, 0)
+    p.share = SharePrompt(p.list)
 
     function p:Refresh()
         self.inst:Refresh()
         self.role:SetValue(MOO_CharDB.role)
-        local mine = ns.myListing
-        local mineHere = false
-        if mine then
-            for _, c in ipairs(cats) do if mine.cat == c then mineHere = true end end
-        end
-        self.post:SetText(mineHere and "Update" or "List group")
-        self.delist:SetShown(mineHere)
+        local mine = myListingRow(cats)
+        self.post:SetText(mine and "Update" or "List group")
+        self.delist:SetShown(mine ~= nil)
         local data = {}
+        if mine then table.insert(data, mine) end     -- your own listing first, as "(your group)"
         for _, c in ipairs(cats) do
             for _, l in ipairs(ns.SortedListings(c)) do table.insert(data, l) end
         end
         self.list:SetData(data, "No " .. title:lower() .. " right now. List one above!")
+        self.share:SetShown(#data == (mine and 1 or 0))      -- nobody else listed
+    end
+    return p
+end
+
+------------------------------------------------------------------------
+-- Quests page: group quests from your quest log, or a custom name
+------------------------------------------------------------------------
+local function QuestPage(parent)
+    local p = CreateFrame("Frame", nil, parent)
+    p:SetAllPoints()
+    local byValue = {}
+
+    local function questItems()
+        wipe(byValue)
+        local out = {}
+        local hadGroup, hadOther = false, false
+        for i, e in ipairs(ns.MyQuests()) do
+            if e.group and not hadGroup then
+                hadGroup = true
+                table.insert(out, { header = true, label = "Group & Elite quests" })
+            elseif not e.group and not hadOther then
+                hadOther = true
+                table.insert(out, { header = true, label = hadGroup and "Other quests" or "Your quests" })
+            end
+            local v = (e.id and e.id > 0) and ("Q" .. e.id) or ("N" .. i)
+            byValue[v] = e
+            local lvl = (e.level and e.level > 0) and ("[" .. e.level .. "] ") or ""
+            table.insert(out, { value = v, label = lvl .. ns.Clean(e.title, 50) })
+        end
+        table.insert(out, { header = true, label = "Not in your quest log" })
+        table.insert(out, { value = "CUSTOM", label = "Custom name..." })
+        return out
+    end
+
+    -- Post form, row 1: quest (or custom name) + players needed
+    local form = Section(p, "List a quest group")
+    form:SetPoint("TOPLEFT", 4, -4)
+    local function updateCustom()
+        if p.custom then p.custom:SetShown(p.quest.value == "CUSTOM") end
+    end
+    p.quest = Dropdown(p, 300, questItems, updateCustom)
+    p.quest:SetPoint("TOPLEFT", 4, -22)
+    p.custom = EditBox(p, 190, 40)
+    p.custom:SetPoint("LEFT", p.quest, "RIGHT", 14, 0)
+    p.customHint = Text(p.custom, "GameFontDisableSmall")
+    p.customHint:SetPoint("LEFT", 2, 0)
+    p.customHint:SetText("Quest or task name")
+    p.custom:HookScript("OnTextChanged", function(self) p.customHint:SetShown(self:GetText() == "") end)
+    p.n = Stepper(p, "Players needed", 2)
+    p.n:SetPoint("TOPRIGHT", -4, -24)
+    updateCustom()
+
+    -- Row 2: min level, note, buttons, my role
+    local minL = Text(p, "GameFontNormalSmall"); minL:SetText("Min level")
+    minL:SetPoint("TOPLEFT", 4, -56)
+    p.min = EditBox(p, 30, 2); p.min:SetPoint("LEFT", minL, "RIGHT", 8, 0); p.min:SetNumeric(true)
+    local noteL = Text(p, "GameFontNormalSmall"); noteL:SetText("Note")
+    noteL:SetPoint("LEFT", p.min, "RIGHT", 10, 0)
+    p.note = EditBox(p, 200, 60); p.note:SetPoint("LEFT", noteL, "RIGHT", 8, 0)
+
+    p.post = Button(p, "List group", 90, 22, function()
+        local v = p.quest.value
+        local key, quest
+        if v == "CUSTOM" then
+            local name = ns.Clean(p.custom:GetText(), 40)
+            if name == "" then ns.Print("Type a name for the quest or task first.") return end
+            key, quest = "Q0", { qname = name, zone = ns.CurrentZone() }
+        else
+            questItems()                     -- make sure byValue matches the current log
+            local e = byValue[v]
+            if not e then ns.Print("Pick a quest first.") return end
+            key = "Q" .. ((e.id and e.id > 0) and e.id or 0)
+            quest = { qname = e.title, zone = e.zone or ns.CurrentZone() }
+        end
+        if p.n.value < 1 then ns.Print("Set how many players you need.") return end
+        ns.PostListing("QUEST", key, 0, 0, p.n.value, tonumber(p.min:GetText()) or 1, p.note:GetText(), quest)
+    end)
+    p.post:SetPoint("LEFT", p.note, "RIGHT", 10, 0)
+    p.delist = Button(p, "Delist", 64, 22, function() ns.Delist() end)
+    p.delist:SetPoint("LEFT", p.post, "RIGHT", 4, 0)
+
+    p.role = Dropdown(p, 150, roleItems, function(v)
+        MOO_CharDB.role = v
+        ns.Fire("STATE_CHANGED")
+    end)
+    p.role:SetPoint("TOPRIGHT", -4, -52)
+
+    -- Listings
+    local lt = Section(p, "Quest groups")
+    lt:SetPoint("TOPLEFT", 4, -88)
+    local legend = Text(p, "GameFontDisableSmall")
+    legend:SetPoint("LEFT", lt, "RIGHT", 12, 0)
+    legend:SetText(HAVE_ICON .. " you have this quest")
+    p.zone = Dropdown(p, 200, function()
+        local out = { { value = "ALL", label = "Zone: all" } }
+        local seen = {}
+        local function add(z)
+            if z and z ~= "" and not seen[z] then
+                seen[z] = true
+                table.insert(out, { value = z, label = "Zone: " .. z })
+            end
+        end
+        add(ns.CurrentZone())
+        local zones = {}
+        for _, l in pairs(ns.listings) do
+            if l.cat == "QUEST" and l.zone and l.zone ~= "" then zones[l.zone] = true end
+        end
+        local sorted = {}
+        for z in pairs(zones) do table.insert(sorted, z) end
+        table.sort(sorted)
+        for _, z in ipairs(sorted) do add(z) end
+        return out
+    end, function() p:Refresh() end)
+    p.zone:SetPoint("TOPRIGHT", -4, -84)
+
+    local hdr = CreateFrame("Frame", nil, p)
+    hdr:SetPoint("TOPLEFT", 4, -108); hdr:SetPoint("RIGHT", -4, 0); hdr:SetHeight(14)
+    local X = { 0, 130, 320, 445, 520 }
+    Header(hdr, { { "Leader", X[1] }, { "Quest", X[2] }, { "Zone", X[3] }, { "Needs", X[4] }, { "Note", X[5] } })
+
+    p.list = List(p, 24, 14,
+        function(r)
+            r.c = {}
+            for i = 1, 5 do
+                r.c[i] = Text(r)
+                r.c[i]:SetPoint("LEFT", X[i] + 2, 0)
+            end
+            r.c[1]:SetWidth(126)
+            r.c[2]:SetWidth(185)
+            r.c[3]:SetWidth(120)
+            r.c[5]:SetWidth(105)
+            buildListingButton(r)
+            r:SetScript("OnClick", function(self) if self.item then ns.ShowGroup(self.item.leader) end end)
+            r:SetScript("OnEnter", listingTooltip)
+            r:SetScript("OnLeave", GameTooltip_Hide)
+        end,
+        function(r, l)
+            r.c[1]:SetText(nameText(l.leader, l.class, l.lvl))
+            r.c[2]:SetText((ns.HaveListingQuest(l) and (HAVE_ICON .. " ") or "") .. ns.ListingWhere(l))
+            r.c[3]:SetText((l.zone and l.zone ~= "") and l.zone or "|cff888888-|r")
+            r.c[4]:SetText(ns.NeedsText(l))
+            r.c[5]:SetText(l.note)
+            fillListingButton(r, l)
+        end)
+    p.list:SetPoint("TOPLEFT", 4, -124)
+    p.list:SetPoint("RIGHT", -4, 0)
+    p.share = SharePrompt(p.list)
+
+    function p:Refresh()
+        self.quest:Refresh()
+        updateCustom()
+        self.role:SetValue(MOO_CharDB.role)
+        self.zone:Refresh()
+        local mine = myListingRow({ "QUEST" })
+        self.post:SetText(mine and "Update" or "List group")
+        self.delist:SetShown(mine ~= nil)
+        local z = self.zone.value
+        local data = {}
+        if mine then table.insert(data, mine) end     -- your own listing first, as "(your group)"
+        for _, l in ipairs(ns.SortedQuestListings(z ~= "ALL" and z or nil)) do table.insert(data, l) end
+        self.list:SetData(data, z ~= "ALL" and "No quest groups in that zone right now." or
+            "No quest groups right now. List one above!")
+        self.share:SetShown(z == "ALL" and #data == (mine and 1 or 0))   -- nobody else listed
     end
     return p
 end
@@ -543,16 +771,15 @@ local function PlayersPage(parent)
     MOO_CharDB.avail = MOO_CharDB.avail or {}
     local saved = MOO_CharDB.avail
 
-    local function catItems()
+    -- every category in one list: "Any <category>" first, then its instances
+    local function pickItems()
         local out = {}
-        for _, c in ipairs(ns.CATEGORIES) do table.insert(out, { value = c.key, label = c.label }) end
-        return out
-    end
-    local function instItems()
-        local cat = p.cat and p.cat.value or "DUNGEON"
-        local out = { { value = "ANY", label = "Anything (" .. catLabel(cat):lower() .. ")", short = "Anything", exclusive = true } }
-        for _, inst in ipairs(ns.INSTANCES_BY_CAT[cat] or {}) do
-            table.insert(out, { value = inst.key, label = inst.name })
+        for _, c in ipairs(ns.CATEGORIES) do
+            table.insert(out, { header = true, label = c.label })
+            table.insert(out, { value = "ANY:" .. c.key, label = ns.AnyLabel(c.key), exclusive = true, group = c.key })
+            for _, inst in ipairs(ns.INSTANCES_BY_CAT[c.key] or {}) do
+                table.insert(out, { value = inst.key, label = inst.name, group = c.key })
+            end
         end
         return out
     end
@@ -561,23 +788,28 @@ local function PlayersPage(parent)
         for _, r in ipairs(ns.ROLES) do table.insert(out, { value = r, label = ns.ROLE_LABEL[r] }) end
         return out
     end
-    local function instOrder()
-        local order = { "ANY" }
-        for _, it in ipairs(instItems()) do if it.value ~= "ANY" then table.insert(order, it.value) end end
+    local function pickOrder()
+        local order = {}
+        for _, it in ipairs(pickItems()) do if not it.header then table.insert(order, it.value) end end
         return order
     end
 
+    -- picks saved by 0.12 and older (one category + "ANY"): carry them over once
+    if not saved.picks and saved.insts then
+        saved.picks = {}
+        for v in pairs(saved.insts) do
+            saved.picks[v == "ANY" and ("ANY:" .. (saved.cat or "DUNGEON")) or v] = true
+        end
+    end
+    saved.cat, saved.insts = nil, nil
+
     local s = Section(p, "Mark yourself available (leaders can invite you)")
     s:SetPoint("TOPLEFT", 4, -4)
-    p.cat = Dropdown(p, 150, catItems, function(v)
-        saved.cat = v
-        p.inst:Refresh()
-        saved.insts = p.inst.selected
-    end)
-    p.cat:SetPoint("TOPLEFT", 4, -22)
-    p.inst = MultiDropdown(p, 230, instItems, function(sel) saved.insts = sel end,
-        { none = "Pick instances", plural = "instances", max = 12, default = function() return "ANY" end })
-    p.inst:SetPoint("LEFT", p.cat, "RIGHT", 8, 0)
+    p.listed = Text(p, "GameFontHighlightSmall", "RIGHT")
+    p.listed:SetPoint("TOPRIGHT", -4, -6)
+    p.inst = MultiDropdown(p, 388, pickItems, function(sel) saved.picks = sel end,
+        { none = "Pick what you want", plural = "picks", max = 12, default = function() return "ANY:DUNGEON" end })
+    p.inst:SetPoint("TOPLEFT", 4, -22)
     p.roles = MultiDropdown(p, 170, roleChoices, function(sel) saved.roles = sel end,
         { none = "Pick roles", plural = "roles", showNames = 3, default = function() return MOO_CharDB.role end })
     p.roles:SetPoint("LEFT", p.inst, "RIGHT", 8, 0)
@@ -586,19 +818,19 @@ local function PlayersPage(parent)
     noteL:SetPoint("TOPLEFT", 4, -56)
     p.note = EditBox(p, 300, 60); p.note:SetPoint("LEFT", noteL, "RIGHT", 8, 0)
     p.go = Button(p, "List me", 90, 22, function()
-        local insts = setToList(p.inst.selected, instOrder())
+        local picks = setToList(p.inst.selected, pickOrder())
         local roles = setToList(p.roles.selected, ns.ROLES)
+        if #picks == 0 then ns.Print("Pick at least one dungeon, raid, PvP option or quest.") return end
         if #roles == 0 then ns.Print("Pick at least one role.") return end
-        ns.SetAvailable(p.cat.value, insts, roles, p.note:GetText())
+        ns.SetAvailable(picks, roles, p.note:GetText())
     end)
     p.go:SetPoint("LEFT", p.note, "RIGHT", 10, 0)
     p.stop = Button(p, "Remove me", 90, 22, function() ns.ClearAvailable() end)
     p.stop:SetPoint("LEFT", p.go, "RIGHT", 4, 0)
 
-    if saved.cat then p.cat:SetValue(saved.cat) end
-    if saved.insts then p.inst:SetSelected(saved.insts) end
+    if saved.picks then p.inst:SetSelected(saved.picks) end
     if saved.roles then p.roles:SetSelected(saved.roles) end
-    saved.insts, saved.roles = p.inst.selected, p.roles.selected
+    saved.picks, saved.roles = p.inst.selected, p.roles.selected
 
     local lt = Section(p, "Available players")
     lt:SetPoint("TOPLEFT", 4, -88)
@@ -625,6 +857,8 @@ local function PlayersPage(parent)
             r.inv:SetPoint("RIGHT", -2, 0)
             r.gear = Button(r, "Gear", 50, 20)
             r.gear:SetPoint("RIGHT", r.inv, "LEFT", -2, 0)
+            r.you = Text(r, "GameFontNormalSmall", "RIGHT")
+            r.you:SetPoint("RIGHT", -6, 0)
             r:SetScript("OnClick", function(self) if self.item then ns.ShowProfile(self.item.name) end end)
             r:SetScript("OnEnter", function(self)
                 local a = self.item
@@ -632,23 +866,27 @@ local function PlayersPage(parent)
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                 GameTooltip:AddLine(ns.ClassColor(a.class, ns.ShortName(a.name)) .. "  |cffaaaaaa" .. a.lvl .. "|r")
                 GameTooltip:AddLine(ns.GuildTooltipLine(a.name))
-                if a.insts[1] == "ANY" then
-                    GameTooltip:AddLine("Wants: " .. ns.AvailableWhereText(a.cat, a.insts), 1, 1, 1)
-                else
-                    GameTooltip:AddLine("Wants:", 1, 0.82, 0)
-                    for _, k in ipairs(a.insts) do GameTooltip:AddLine("  " .. ns.InstanceName(k), 1, 1, 1) end
-                end
+                GameTooltip:AddLine("Wants:", 1, 0.82, 0)
+                for _, name in ipairs(ns.AvailableWhereList(a)) do GameTooltip:AddLine("  " .. name, 1, 1, 1) end
                 if a.note ~= "" then GameTooltip:AddLine(a.note, 0.8, 0.8, 0.8, true) end
+                if a.mine then GameTooltip:AddLine("This is you. \"Remove me\" takes you off.", 1, 0.82, 0) end
                 GameTooltip:Show()
             end)
             r:SetScript("OnLeave", GameTooltip_Hide)
         end,
         function(r, a)
             r.c[1]:SetText(nameText(a.name, a.class, a.lvl))
-            r.c[2]:SetText(ns.AvailableWhereText(a.cat, a.insts))
+            r.c[2]:SetText(ns.AvailableWhereText(a))
             r.c[3]:SetText(ns.RolesText(a.roles))
             r.c[4]:SetText(a.note)
             r.c[5]:SetText("")
+            r.inv:SetShown(not a.mine); r.gear:SetShown(not a.mine)
+            r.you:SetShown(a.mine == true)
+            if a.mine then
+                local st = ns.MyAvailableStatus()
+                r.you:SetText(st == "live" and (READY_OK .. " (you)") or (READY_WAIT .. " (you)"))
+                return
+            end
             r.inv:SetScript("OnClick", function() ns.InviteName(a.name) end)
             r.gear:SetScript("OnClick", function()
                 if not ns.myListing then
@@ -663,12 +901,32 @@ local function PlayersPage(parent)
     p.list:SetPoint("RIGHT", -4, 0)
 
     function p:Refresh()
-        self.cat:Refresh(); self.inst:Refresh(); self.roles:Refresh(); self.filter:Refresh()
+        self.inst:Refresh(); self.roles:Refresh(); self.filter:Refresh()
         self.go:SetText(ns.myAvailable and "Update" or "List me")
         self.stop:SetShown(ns.myAvailable ~= nil)
         local f = self.filter.value
-        self.list:SetData(ns.SortedAvailable(f ~= "ALL" and f or nil),
+        local data = ns.SortedAvailable(f ~= "ALL" and f or nil)
+        local a = ns.myAvailable
+        if a then    -- yourself first, so you can see you're listed and how
+            local me = CopyTable(a)
+            me.name, me.mine = ns.Me(), true
+            me.class, me.lvl = select(2, UnitClass("player")), UnitLevel("player")
+            table.insert(data, 1, me)
+        end
+        self.list:SetData(data,
             f == "MATCH" and "Nobody available fits your listing right now." or "Nobody is marked available right now.")
+        local st = ns.MyAvailableStatus()
+        if st == "live" then
+            self.listed:SetText(READY_OK .. " |cff33ff33You're listed.|r Others can see you.")
+        elseif st == "sending" then
+            self.listed:SetText(READY_WAIT .. " Sending your listing...")
+        elseif st == "instance" then
+            self.listed:SetText(READY_WAIT .. " |cffffaa00Goes out when you leave the instance.|r")
+        elseif st == "unconfirmed" then
+            self.listed:SetText(READY_WAIT .. " |cffffaa00Not confirmed yet.|r Check /moo status.")
+        else
+            self.listed:SetText("|cff888888You're not listed.|r")
+        end
     end
     return p
 end
@@ -686,6 +944,8 @@ local function MyGroupPage(parent)
     p.d = Stepper(p, "DPS", 0, pushNeeds);    p.d:SetPoint("TOPRIGHT", -4, -2)
     p.h = Stepper(p, "Healer", 0, pushNeeds); p.h:SetPoint("RIGHT", p.d, "LEFT", -10, 0)
     p.t = Stepper(p, "Tank", 0, pushNeeds);   p.t:SetPoint("RIGHT", p.h, "LEFT", -10, 0)
+    p.q = Stepper(p, "Players", 0, function() ns.UpdateNeeds(0, 0, p.q.value) end)
+    p.q:SetPoint("TOPRIGHT", -4, -2)
 
     local hdr = CreateFrame("Frame", nil, p)
     hdr:SetPoint("TOPLEFT", 4, -28); hdr:SetPoint("RIGHT", -4, 0); hdr:SetHeight(14)
@@ -780,12 +1040,14 @@ local function MyGroupPage(parent)
     function p:Refresh()
         local l = ns.myListing
         if l then
-            self.status:SetText("Your listing: |cffffffff" .. ns.InstanceName(l.inst) .. "|r   still need:")
-            self.t:Set(l.t); self.h:Set(l.h); self.d:Set(l.d)
-            self.t:Show(); self.h:Show(); self.d:Show()
+            self.status:SetText("Your listing: |cffffffff" .. ns.ListingWhere(l) .. "|r   still need:")
+            local quest = (l.cat == "QUEST")
+            self.t:Set(l.t); self.h:Set(l.h); self.d:Set(l.d); self.q:Set(l.d)
+            self.t:SetShown(not quest); self.h:SetShown(not quest); self.d:SetShown(not quest)
+            self.q:SetShown(quest)
         else
-            self.status:SetText("You have no listing. List a group from Dungeons, Raids or PvP.")
-            self.t:Hide(); self.h:Hide(); self.d:Hide()
+            self.status:SetText("You have no listing. List a group from Dungeons, Raids, PvP or Quests.")
+            self.t:Hide(); self.h:Hide(); self.d:Hide(); self.q:Hide()
         end
         self.sound:SetText(MOO_DB.sound == false and "Alert sound: Off" or "Alert sound: On")
         self.apps:SetData(ns.SortedApplicants(), l and "No applicants yet." or "")
@@ -922,13 +1184,23 @@ end
 -- Main window
 ------------------------------------------------------------------------
 local TAB_DEFS = {
-    { label = "Dungeons", build = function(c) return GroupPage(c, { "DUNGEON" }, "Dungeon groups") end },
-    { label = "Raids",    build = function(c) return GroupPage(c, { "RAID" }, "Raid groups") end },
-    { label = "PvP",      build = function(c) return GroupPage(c, { "BG", "WPVP" }, "PvP groups") end },
-    { label = "Players",  build = PlayersPage },
-    { label = "My Group", build = MyGroupPage },
-    { label = "Ratings",  build = RatingsPage },
+    { key = "dungeons", label = "Dungeons", build = function(c) return GroupPage(c, { "DUNGEON" }, "Dungeon groups") end },
+    { key = "raids",    label = "Raids",    build = function(c) return GroupPage(c, { "RAID" }, "Raid groups") end },
+    { key = "pvp",      label = "PvP",      build = function(c) return GroupPage(c, { "BG", "WPVP" }, "PvP groups") end },
+    { key = "quests",   label = "Quests",   build = QuestPage },
+    { key = "players",  label = "Players",  build = PlayersPage },
+    { key = "mygroup",  label = "My Group", build = MyGroupPage },
+    { key = "ratings",  label = "Ratings",  build = RatingsPage },
 }
+
+-- A tab's number from its key ("mygroup", "coach"...), so nothing depends on tab order.
+function ns.TabIndex(key)
+    if type(key) == "number" then return key end
+    for i, def in ipairs(TAB_DEFS) do if def.key == key then return i end end
+    for i, def in ipairs(ns.EXTRA_TABS or {}) do
+        if def.key == key then return #TAB_DEFS + i end   -- before the window is built
+    end
+end
 
 local function selectTab(i)
     main.selected = i
@@ -972,10 +1244,20 @@ local function makeMain()
         ns.SetTheme(ns.IsDark() and "classic" or "dark")
     end)
     f.themeBtn:SetPoint("RIGHT", f.oly, "LEFT", -6, 0)
+    f.share = Button(f, "Tell my guild", 104, 20, function() ns.ShowShare() end)
+    f.share:SetPoint("RIGHT", f.themeBtn, "LEFT", -6, 0)
+    f.share:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine("Tell my guild")
+        GameTooltip:AddLine("Post one short line about MOO in your guild chat. You see it first.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    f.share:SetScript("OnLeave", GameTooltip_Hide)
     f.status = Text(f, "GameFontDisableSmall", "RIGHT")
-    f.status:SetPoint("RIGHT", f.themeBtn, "LEFT", -8, 0)
+    f.status:SetPoint("RIGHT", f.share, "LEFT", -8, 0)
 
     for _, extra in ipairs(ns.EXTRA_TABS or {}) do table.insert(TAB_DEFS, extra) end
+    ns.EXTRA_TABS = {}     -- now part of TAB_DEFS
     for i, def in ipairs(TAB_DEFS) do
         local page = def.build(content)
         page:Hide()
@@ -1016,6 +1298,10 @@ function ns.RefreshUI()
     main.status:SetText(cross .. "   " .. oly)
     main.oly:SetShown(ns.OlympusAddonLoaded())
     main.themeBtn:SetText(ns.IsDark() and "Classic" or "Dark mode")
+    local newer = ns.UpdateAvailable and ns.UpdateAvailable()
+    local title = "Muster Of Olympus  |cff888888(MOO " .. ns.VERSION .. ")|r" ..
+        (newer and ("  |cffffaa00Update available: " .. newer .. "|r") or "")
+    if main.SetTitle then main:SetTitle(title) elseif main.TitleText then main.TitleText:SetText(title) end
     main.themeBtn:ClearAllPoints()
     if main.oly:IsShown() then main.themeBtn:SetPoint("RIGHT", main.oly, "LEFT", -6, 0)
     else main.themeBtn:SetPoint("TOPRIGHT", -30, -32) end
@@ -1027,24 +1313,26 @@ function ns.ToggleMain(tab)
     if not main then makeMain() end
     if main:IsShown() and not tab then main:Hide() return end
     main:Show()
-    if tab then selectTab(tab) end
+    tab = tab and ns.TabIndex(tab)
+    if tab and pages[tab] then selectTab(tab) end
     ns.RefreshUI()
 end
 
 for _, ev in ipairs({ "LISTINGS_UPDATED", "APPLICANTS_UPDATED", "GROUP_INFO", "STATE_CHANGED",
                       "READY_CHECK_UPDATED", "RATINGS_UPDATED", "GEAR_UPDATED", "INSTANCES_CHANGED",
-                      "COACH_UPDATED" }) do
+                      "COACH_UPDATED", "QUESTS_CHANGED" }) do
     ns.Listen(ev, function() ns.RefreshUI(); if ns.RefreshDetail then ns.RefreshDetail() end end)
 end
 ns.On("GROUP_ROSTER_UPDATE", function() ns.RefreshUI() end)
 ns.Listen("APPLICANTS_UPDATED", function()
     -- jump to My Group when the first applicant arrives while the window is open
-    if main and main:IsShown() and main.selected ~= 5 then
+    local i = ns.TabIndex("mygroup")
+    if main and main:IsShown() and main.selected ~= i then
         for _, a in pairs(ns.applicants) do
-            if a.state == "new" then tabs[5]:SetText("My Group (!)") return end
+            if a.state == "new" then tabs[i]:SetText("My Group (!)") return end
         end
     end
-    if tabs[5] then tabs[5]:SetText("My Group") end
+    if tabs[i] then tabs[i]:SetText("My Group") end
 end)
 
 ------------------------------------------------------------------------
@@ -1242,8 +1530,9 @@ function ns.RefreshGroupFrame()
     if l == ns.myListing then l.leader = ns.Me() end
     f.listing = l
     f.noRatings = (l.cat == "WPVP")
-    f.title:SetText(ns.ShortName(l.leader) .. "'s group - " .. ns.InstanceName(l.inst))
-    f.sub:SetText("Needs: " .. ns.NeedsText(l) .. (l.note ~= "" and ("   |cffffffff" .. l.note .. "|r") or "") ..
+    f.title:SetText(ns.ShortName(l.leader) .. "'s group - " .. ns.ListingWhere(l))
+    local zone = (l.cat == "QUEST" and l.zone and l.zone ~= "") and ("   Zone: |cffffffff" .. l.zone .. "|r") or ""
+    f.sub:SetText("Needs: " .. ns.NeedsText(l) .. zone .. (l.note ~= "" and ("   |cffffffff" .. l.note .. "|r") or "") ..
         "\n|cff888888Ratings are shared once you apply or join.|r")
     local members = ns.ListingMembers(l)
     f.list:SetData(members, "")
@@ -1298,7 +1587,7 @@ local ICON = "Interface\\Icons\\INV_Misc_GroupNeedMore"
 local minimapButton
 
 local function onClick(button)
-    if button == "RightButton" then ns.ToggleMain(5) else ns.ToggleMain() end
+    if button == "RightButton" then ns.ToggleMain("mygroup") else ns.ToggleMain() end
 end
 
 local function tooltip(tt)

@@ -5,7 +5,7 @@
 local ADDON, ns = ...
 _G.MOO = ns
 
-ns.VERSION = "0.11.0-alpha"
+ns.VERSION = "0.12.0-alpha"
 ns.PREFIX  = "MOO1"
 
 -- Cross-guild: MOO users in every Olympus guild share one hidden channel.
@@ -130,7 +130,7 @@ end
 -- so nobody can inject color codes, textures or fake links into MOO's UI.
 ------------------------------------------------------------------------
 local VALID_ROLES = { TANK = true, HEAL = true, DPS = true }
-local VALID_CATS = { DUNGEON = true, RAID = true, BG = true, WPVP = true }
+local VALID_CATS = { DUNGEON = true, RAID = true, BG = true, WPVP = true, QUEST = true }
 
 function ns.ValidRole(r) return VALID_ROLES[r] and r or nil end
 function ns.ValidCat(c) return VALID_CATS[c] and c or nil end
@@ -317,14 +317,35 @@ local function findSlashCommand(command)
     end
 end
 
+-- Olympus doesn't always register /oly in SlashCmdList, so when MOO can't find it there
+-- it sends "/oly" through the chat box, exactly as if the player typed it.
+local function sendThroughChat(command)
+    if not (ChatEdit_ChooseBoxForSend and ChatEdit_SendText) then return false end
+    local ok = pcall(function()
+        local editBox = ChatEdit_ChooseBoxForSend()
+        if not editBox then error("no chat box") end
+        if ChatEdit_ActivateChat then ChatEdit_ActivateChat(editBox) end
+        editBox:SetText(command)
+        ChatEdit_SendText(editBox, 0)
+        if ChatEdit_DeactivateChat and editBox:IsShown() and editBox:GetText() == "" then
+            ChatEdit_DeactivateChat(editBox)
+        end
+    end)
+    return ok
+end
+
 function ns.OpenOlympus()
-    local fn = findSlashCommand("/oly") or findSlashCommand("/olympus")
-    if fn then
-        fn("")
-    elseif ns.OlympusAddonLoaded() then
-        ns.Print("Couldn't open Olympus from here. Type /oly in chat.")
-    else
+    if not ns.OlympusAddonLoaded() then
         ns.Print("The Olympus addon is not loaded.")
+        return
+    end
+    local fn = findSlashCommand("/oly") or findSlashCommand("/olympus")
+    if fn and pcall(fn, "") then return end
+    if sendThroughChat("/oly") then return end
+    if ChatFrame_OpenChat then
+        ChatFrame_OpenChat("/oly")     -- last resort: /oly typed in the chat box, press Enter
+    else
+        ns.Print("Couldn't open Olympus from here. Type /oly in chat.")
     end
 end
 
@@ -463,8 +484,12 @@ COMMANDS.sound = function(rest)
     else ns.SetSound(MOO_DB.sound == false) end   -- no word: toggle
 end
 COMMANDS.theme = function(rest) ns.SetTheme((rest or ""):lower()) end
-COMMANDS.coach = function() ns.ToggleMain(7) end
-COMMANDS.feedback = function() ns.ToggleMain(8) end
+COMMANDS.coach = function() ns.ToggleMain("coach") end
+COMMANDS.feedback = function() ns.ToggleMain("feedback") end
+COMMANDS.quests = function() ns.ToggleMain("quests") end
+COMMANDS.quest = COMMANDS.quests
+COMMANDS.share = function() ns.ShowShare() end
+COMMANDS.release = function(rest) ns.ReleaseCommand(rest) end
 COMMANDS.recruit = function(rest) ns.RecruitCommand(rest) end
 COMMANDS.bug = function() ns.ShowCopyBox("MOO bug report: copy and paste this into your report", ns.BugReport()) end
 COMMANDS.minimap = function() ns.SetMinimapButtonShown(MOO_DB.minimap.hide) end
@@ -488,10 +513,11 @@ COMMANDS.suggestions = function(rest)
 end
 COMMANDS.help = function()
     ns.Print("/mooo or /moo open: open the window. Plain /moo (or /moo Name) still moos.")
-    ns.Print("/moo optin | optout | role tank|heal|dps | rc | rate | who Name | coach | feedback | guide <topic> | suggestions on|off | minimap")
+    ns.Print("/moo optin | optout | role tank|heal|dps | rc | rate | who Name | quests | share | coach | feedback | guide <topic> | suggestions on|off | minimap")
     ns.Print("/moo key <secret> | instance [link KEY | forget | keys] | instances [export] | status | bug | theme dark|classic | sound on|off | names | selftest on|off")
     if ns.IsRecruitOwner and ns.IsRecruitOwner() then
         ns.Print("/moo recruit on | off | link <link> | message <text> | send Name | list  (answer tester whispers)")
+        ns.Print("/moo release <version> | off  (after it's live on CurseForge: tell older MOOs to update)")
     end
 end
 
@@ -523,7 +549,8 @@ SLASH_MOOWINDOW1 = "/mooo"
 SlashCmdList["MOOWINDOW"] = function(input) runCommand(input, true) end
 
 function ns.PrintStatus()
-    ns.Print("Version " .. ns.VERSION)
+    ns.Print("Version " .. ns.VERSION .. (ns.UpdateAvailable and ns.UpdateAvailable() and
+        ("  |cffffaa00(newer release out: " .. ns.UpdateAvailable() .. ")|r") or ""))
     ns.Print("Olympus guild: " .. (ns.InOlympus() and "yes" or "no") ..
         "  |  Olympus addon: " .. (ns.OlympusAddonLoaded() and "loaded" or "not loaded"))
     ns.Print("Opted in: " .. (ns.IsOptedIn() and "yes" or "no") .. "  |  Role: " .. MOO_CharDB.role)
@@ -673,7 +700,7 @@ function ns.BugReport()
     add("In group: ", IsInRaid() and "raid" or (IsInGroup() and "party" or "no"),
         "   In instance: ", select(2, IsInInstance()) or "?")
     add("Listings seen: ", ns.listings and #(ns.SortedListings("DUNGEON")) + #(ns.SortedListings("RAID")) +
-        #(ns.SortedListings("BG")) + #(ns.SortedListings("WPVP")) or 0,
+        #(ns.SortedListings("BG")) + #(ns.SortedListings("WPVP")) + #(ns.SortedListings("QUEST")) or 0,
         "   Available players: ", ns.available and #(ns.SortedAvailable()) or 0,
         "   My listing: ", ns.myListing and ns.myListing.inst or "none",
         "   Applicants: ", ns.applicants and #(ns.SortedApplicants()) or 0)

@@ -153,4 +153,4 @@ local function FeedbackPage(parent)
 end
 
 ns.EXTRA_TABS = ns.EXTRA_TABS or {}
-table.insert(ns.EXTRA_TABS, { label = "Coach", build = FeedbackPage })
+table.insert(ns.EXTRA_TABS, { key = "coach", label = "Coach", build = FeedbackPage })

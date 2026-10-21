@@ -3,6 +3,8 @@
 -- * Listings and "available" flags go to Olympus MOO users on your realm (guild + hidden
 --   channel), repeated every 90 s while up, and drop off 4 minutes after the last repeat.
 -- * Applying is a whisper (addon message) to the leader only, with your gear and stats.
+-- * Group quest listings (category QUEST) carry the quest's ID as "Q<questID>" ("Q0" for a
+--   custom name), plus its name and zone, and take themselves down after 20 minutes.
 -- * Every invite comes from the leader clicking Invite. MOO never invites, accepts,
 --   queues or joins anything by itself.
 
@@ -51,7 +53,11 @@ end
 local function sendListing()
     local l = ns.myListing
     if not l then return end
-    ns.Send("NET", { "L", l.id, l.cat, l.inst, l.t, l.h, l.d, l.min, myLevel(), myClass(), l.note, customName(l.inst) })
+    if l.cat == "QUEST" then
+        ns.Send("NET", { "L", l.id, l.cat, l.inst, l.t, l.h, l.d, l.min, myLevel(), myClass(), l.note, l.qname, l.zone })
+    else
+        ns.Send("NET", { "L", l.id, l.cat, l.inst, l.t, l.h, l.d, l.min, myLevel(), myClass(), l.note, customName(l.inst) })
+    end
     -- the group's members follow in one or more "LM" messages, so everyone can see their ratings
     local chunk, size, seq = {}, 0, 0
     local function flush()
@@ -82,8 +88,23 @@ local function resendSoon()
     end)
 end
 
-function ns.PostListing(cat, inst, t, h, d, minLvl, note)
+-- What a listing is for: the instance's name, or the quest's.
+function ns.ListingWhere(l)
+    if not l then return "?" end
+    if l.cat == "QUEST" then return ns.QuestListingName(l) end
+    return ns.InstanceName(l.inst)
+end
+
+-- quest (QUEST only): { qname =, zone = }
+function ns.PostListing(cat, inst, t, h, d, minLvl, note, quest)
     if not ns.RequireReady("list a group") then return end
+    if cat == "QUEST" then
+        if type(inst) ~= "string" or not inst:match("^Q%d+$") or #inst > 12 then return end
+        if not quest or ns.Clean(quest.qname, 40) == "" then
+            ns.Print("Pick a quest or type a name first.")
+            return
+        end
+    end
     if IsInGroup() and not UnitIsGroupLeader("player") then
         ns.Print("Only the group leader can list the group.")
         return
@@ -96,9 +117,20 @@ function ns.PostListing(cat, inst, t, h, d, minLvl, note)
         note = ns.Clean(note, 60),
         ts = ns.Now(),
     }
+    if cat == "QUEST" then
+        local l = ns.myListing
+        l.qid = tonumber(inst:sub(2)) or 0
+        l.qname = ns.Clean(quest.qname, 40)
+        l.zone = ns.Clean(quest.zone, 30)
+    end
     ns.applicants = {}
     sendListing()
-    ns.Print("Group listed: " .. ns.InstanceName(inst) .. ".")
+    if cat == "QUEST" then
+        ns.Print("Group listed: " .. ns.ListingWhere(ns.myListing) .. ". It comes down by itself after " ..
+            math.floor(ns.QUEST_LIFETIME / 60) .. " minutes; list it again to keep it up.")
+    else
+        ns.Print("Group listed: " .. ns.InstanceName(inst) .. ".")
+    end
     ns.Fire("LISTINGS_UPDATED")
 end
 
@@ -129,15 +161,26 @@ end
 ns.Handle("L", function(sender, f)
     local id, cat, inst = f[2], ns.ValidCat(f[3]), f[4]
     if not validId(id) or not cat or not validId(inst) then return end
-    learnCustom(inst, f[12])
-    if not ns.IsKnownInstanceKey(inst) then return end
-    local known = ns.INSTANCE_BY_KEY[inst]
-    if known and known.cat ~= cat then return end
+    local qid, qname, zone
+    if cat == "QUEST" then
+        qid = inst:match("^Q(%d+)$")
+        if not qid then return end
+        qid = tonumber(qid)
+        qname = ns.Clean(f[12], 40)
+        if qname == "" then qname = "Group quest" end
+        zone = ns.Clean(f[13], 30)
+    else
+        learnCustom(inst, f[12])
+        if not ns.IsKnownInstanceKey(inst) then return end
+        local known = ns.INSTANCE_BY_KEY[inst]
+        if known and known.cat ~= cat then return end
+    end
     ns.listings[sender] = {
         id = id, leader = sender, cat = cat, inst = inst,
         t = ns.Clamp(f[5], 0, 40, 0), h = ns.Clamp(f[6], 0, 40, 0), d = ns.Clamp(f[7], 0, 40, 0),
         min = ns.Clamp(f[8], 1, 60, 1), lvl = ns.Clamp(f[9], 0, 60, 0), class = ns.ValidClass(f[10]),
         note = ns.Clean(f[11], 60), ts = GetTime(),
+        qid = qid, qname = qname, zone = zone,
     }
     ns.Fire("LISTINGS_UPDATED")
 end)
@@ -195,8 +238,16 @@ end)
 
 ------------------------------------------------------------------------
 -- Marking yourself available (shows on the Players tab, leaders can invite you)
+--
+-- One availability can cover several categories (e.g. three dungeons and any World PvP).
+-- a.picks = { [cat] = { keys } } with "ANY" meaning anything in that category, and
+-- a.cats lists the categories in ns.CATEGORIES order (a.cat = the first one).
+--
+-- Wire format: W ^ cat ^ keys ^ roles ^ lvl ^ class ^ note ^ customNames ^ others
+-- "cat" and "keys" are the first category, so MOO 0.12 and older still understand it;
+-- "others" carries the rest as "BG:ANY;WPVP:HILLS,SILI" (ignored by older versions).
 ------------------------------------------------------------------------
-local MAX_AVAIL_INSTANCES = 12
+local MAX_AVAIL_PICKS = 12
 local LIST_SEP = ","   -- inside one field: keys or roles
 
 -- Names of custom instances (C<mapID>) among the keys, as "C123=Name;C456=Name".
@@ -210,33 +261,108 @@ local function customNames(keys)
     return #out > 60 and out:sub(1, 60) or out
 end
 
+local function sortCats(picks)
+    local cats = {}
+    for _, c in ipairs(ns.CATEGORIES) do
+        if picks[c.key] and #picks[c.key] > 0 then table.insert(cats, c.key) end
+    end
+    return cats
+end
+
+-- Picks from the Players tab: instance keys and "ANY:<CAT>" values.
+-- Returns picks, cats (see above). At most MAX_AVAIL_PICKS entries in all.
+function ns.PicksFromValues(values)
+    local picks, total = {}, 0
+    for _, v in ipairs(values or {}) do
+        if type(v) == "string" then
+            local cat, key = v:match("^ANY:(%u+)$"), v
+            if cat then
+                cat, key = ns.ValidCat(cat), "ANY"
+            else
+                local e = ns.INSTANCE_BY_KEY[v]
+                cat = e and e.cat
+            end
+            if cat then
+                local list = picks[cat] or {}
+                picks[cat] = list
+                if key == "ANY" then
+                    if list[1] ~= "ANY" then
+                        total = total - #list + 1
+                        picks[cat] = { "ANY" }
+                    end
+                elseif list[1] ~= "ANY" and total < MAX_AVAIL_PICKS and not tContains(list, key) then
+                    table.insert(list, key)
+                    total = total + 1
+                end
+            end
+        end
+    end
+    return picks, sortCats(picks)
+end
+
 local function sendAvailable()
     local a = ns.myAvailable
     if not a then return end
-    ns.Send("NET", { "W", a.cat, table.concat(a.insts, LIST_SEP), table.concat(a.roles, LIST_SEP),
-        myLevel(), myClass(), a.note, customNames(a.insts) })
+    local first = a.cats[1]
+    local allKeys, others = {}, {}
+    for i, c in ipairs(a.cats) do
+        for _, k in ipairs(a.picks[c]) do table.insert(allKeys, k) end
+        if i > 1 then table.insert(others, c .. ":" .. table.concat(a.picks[c], LIST_SEP)) end
+    end
+    local fields = { "W", first, table.concat(a.picks[first], LIST_SEP), table.concat(a.roles, LIST_SEP),
+        myLevel(), myClass(), a.note, customNames(allKeys), table.concat(others, ";") }
+    -- stay under the message size limit: drop custom instance names first, then shorten the note
+    local function size()
+        local n = #fields - 1
+        for _, v in ipairs(fields) do n = n + #tostring(v) end
+        return n
+    end
+    if size() > 250 then fields[8] = "" end
+    if size() > 250 then fields[7] = ns.Clean(a.note:sub(1, math.max(0, #a.note - (size() - 250)))) end
+    ns.Send("NET", fields)
 end
 
--- insts: list of instance keys ({"ANY"} = anything in the category); roles: list of roles
-function ns.SetAvailable(cat, insts, roles, note)
+-- values: instance keys and "ANY:<CAT>"; roles: list of roles
+function ns.SetAvailable(values, roles, note)
     if not ns.RequireReady("mark yourself available") then return end
-    local keys = {}
-    for _, k in ipairs(insts or {}) do
-        if k == "ANY" then keys = { "ANY" } break end
-        if ns.INSTANCE_BY_KEY[k] and #keys < MAX_AVAIL_INSTANCES then table.insert(keys, k) end
-    end
-    if #keys == 0 then keys = { "ANY" } end
+    local picks, cats = ns.PicksFromValues(values)
+    if #cats == 0 then picks, cats = { DUNGEON = { "ANY" } }, { "DUNGEON" } end
     local rl = {}
     for _, r in ipairs(ns.ROLES) do
         for _, want in ipairs(roles or {}) do if want == r then table.insert(rl, r) end end
     end
     if #rl == 0 then rl = { MOO_CharDB.role } end
-    ns.myAvailable = { cat = cat, insts = keys, roles = rl, note = ns.Clean(note, 60) }
+    ns.myAvailable = { picks = picks, cats = cats, cat = cats[1], roles = rl, note = ns.Clean(note, 60),
+        sentAt = GetTime() }
     ns.myAvailableReminded = nil
     sendAvailable()
-    ns.Print("You are listed as available for " .. ns.AvailableWhereText(cat, keys) ..
-        " as " .. ns.RolesText(rl) .. ".")
+    C_Timer.After(31, function() ns.Fire("LISTINGS_UPDATED") end)   -- "sending" -> "not confirmed" if nothing came back
+    ns.Print("Listing you as available for " .. ns.AvailableWhereText(ns.myAvailable, true) ..
+        " as " .. ns.RolesText(rl) .. "...")
     ns.Fire("LISTINGS_UPDATED")
+end
+
+-- My availability came back from the server: it's live for everyone else.
+ns.Listen("OWN_ECHO", function(kind)
+    local a = ns.myAvailable
+    if kind ~= "W" or not a then return end
+    if not a.confirmed then
+        ns.Print("|cff33ff33You're listed.|r Other MOO players can see you on their Players tab now.")
+    end
+    a.confirmed = GetTime()
+    ns.Fire("LISTINGS_UPDATED")
+end)
+
+-- "none", "live" (seen coming back recently), "instance" (waits until you leave),
+-- "sending" (just sent), or "unconfirmed" (sent a while ago, never seen coming back)
+function ns.MyAvailableStatus()
+    local a = ns.myAvailable
+    if not a then return "none" end
+    local now = GetTime()
+    if a.confirmed and now - a.confirmed < EXPIRE then return "live" end
+    if ns.InRestrictedInstance and ns.InRestrictedInstance() then return "instance" end
+    if now - (a.sentAt or now) < 30 then return "sending" end
+    return "unconfirmed"
 end
 
 function ns.ClearAvailable(silent)
@@ -248,26 +374,46 @@ function ns.ClearAvailable(silent)
 end
 
 ns.Handle("W", function(sender, f)
-    local cat = ns.ValidCat(f[2])
-    if not cat then return end
+    local first = ns.ValidCat(f[2])
+    if not first then return end
     for entry in (f[8] or ""):gmatch("[^;]+") do
         local key, name = entry:match("^(C%d+)=(.+)$")
         if key then learnCustom(key, name) end
     end
-    local insts = {}
-    for k in (f[3] or ""):gmatch("[^,]+") do
-        if k == "ANY" or ns.IsKnownInstanceKey(k) then table.insert(insts, k) end
-        if #insts >= MAX_AVAIL_INSTANCES then break end
+    local picks, total = {}, 0
+    local function addCat(cat, list, isFirst)
+        if picks[cat] then return end
+        local keys = {}
+        for k in (list or ""):gmatch("[^,]+") do
+            if k == "ANY" then keys = { "ANY" } break end
+            if total + #keys >= MAX_AVAIL_PICKS then break end
+            local e = ns.INSTANCE_BY_KEY[k]
+            if ((e and e.cat == cat) or (not e and ns.IsKnownInstanceKey(k))) and not tContains(keys, k) then
+                table.insert(keys, k)
+            end
+        end
+        if #keys == 0 then
+            if not isFirst then return end
+            keys = { "ANY" }
+        end
+        total = total + #keys
+        picks[cat] = keys
     end
-    if #insts == 0 then insts = { "ANY" } end
+    addCat(first, f[3], true)
+    for seg in (f[9] or ""):gmatch("[^;]+") do
+        local cat, list = seg:match("^(%u+):(.*)$")
+        cat = ns.ValidCat(cat)
+        if cat and total < MAX_AVAIL_PICKS then addCat(cat, list, false) end
+    end
     local roles = {}
     local seenRole = {}
     for r in (f[4] or ""):gmatch("[^,]+") do
         if ns.ValidRole(r) and not seenRole[r] then seenRole[r] = true; table.insert(roles, r) end
     end
     if #roles == 0 then roles = { "DPS" } end
+    local cats = sortCats(picks)
     ns.available[sender] = {
-        cat = cat, insts = insts, roles = roles,
+        picks = picks, cats = cats, cat = cats[1], roles = roles,
         lvl = ns.Clamp(f[5], 0, 60, 0), class = ns.ValidClass(f[6]), note = ns.Clean(f[7], 60), ts = GetTime(),
     }
     ns.Fire("LISTINGS_UPDATED")
@@ -279,28 +425,43 @@ function ns.RolesText(roles)
     return table.concat(parts, "/")
 end
 
--- "Any dungeon", "Blackrock Depths", or "Blackrock Depths, Stratholme +2"
-function ns.AvailableWhereText(cat, insts)
-    if not insts or #insts == 0 or insts[1] == "ANY" then
-        local label = cat
-        for _, c in ipairs(ns.CATEGORIES) do if c.key == cat then label = c.label end end
-        return "any " .. label:lower():gsub("s$", "")
+local ANY_LABEL = {
+    DUNGEON = "Any dungeon", RAID = "Any raid", BG = "Any battleground",
+    WPVP = "Any World PvP", QUEST = "Any group quest",
+}
+function ns.AnyLabel(cat) return ANY_LABEL[cat] or ("Any " .. tostring(cat):lower()) end
+
+-- Every pick as a display name, in order: "Any dungeon", "Warsong Gulch", ...
+function ns.AvailableWhereList(a)
+    local out = {}
+    for _, c in ipairs(a.cats or {}) do
+        local keys = a.picks[c]
+        if keys[1] == "ANY" then table.insert(out, ns.AnyLabel(c))
+        else for _, k in ipairs(keys) do table.insert(out, ns.InstanceName(k)) end end
     end
-    if #insts <= 2 then
-        local names = {}
-        for _, k in ipairs(insts) do table.insert(names, ns.InstanceName(k)) end
-        return table.concat(names, ", ")
-    end
-    return ns.InstanceName(insts[1]) .. ", " .. ns.InstanceName(insts[2]) .. " +" .. (#insts - 2)
+    return out
 end
 
--- Does an available player fit a listing (same category, wants that instance or
--- anything, and plays a role the group still needs)?
+-- "Any dungeon", "Deadmines, Warsong Gulch", or "Deadmines, Stockade +3"
+-- (inSentence: "any dungeon" in lower case, for chat lines)
+function ns.AvailableWhereText(a, inSentence)
+    local parts = ns.AvailableWhereList(a)
+    local text
+    if #parts == 0 then text = "Any dungeon"
+    elseif #parts <= 2 then text = table.concat(parts, ", ")
+    else text = parts[1] .. ", " .. parts[2] .. " +" .. (#parts - 2) end
+    if inSentence then text = text:gsub("^Any ", "any "):gsub(", Any ", ", any ") end
+    return text
+end
+
+-- Does an available player fit a listing (wants that instance or anything in its
+-- category, and plays a role the group still needs)?
 function ns.AvailableMatches(a, l)
-    if not l or a.cat ~= l.cat then return false end
-    local instOk = false
-    for _, k in ipairs(a.insts) do if k == "ANY" or k == l.inst then instOk = true end end
-    if not instOk then return false end
+    if not l or not a.picks then return false end
+    local keys = a.picks[l.cat]
+    if not keys then return false end
+    if keys[1] ~= "ANY" and not tContains(keys, l.inst) then return false end
+    if l.cat == "QUEST" then return true end       -- quest groups take any role
     if (l.t or 0) + (l.h or 0) + (l.d or 0) == 0 then return true end
     local need = { TANK = (l.t or 0) > 0, HEAL = (l.h or 0) > 0, DPS = (l.d or 0) > 0 }
     for _, r in ipairs(a.roles) do if need[r] then return true end end
@@ -327,7 +488,7 @@ function ns.Apply(leader, role, note)
     ns.SendGearTo(leader, l.id)
     ns.SendRatingSummaryTo(leader, l.id)
     ns.myApplications[leader] = { id = l.id, role = role, state = "sent", ts = ns.Now() }
-    ns.Print("Applied to " .. ns.ShortName(leader) .. "'s " .. ns.InstanceName(l.inst) .. " group as " .. ns.ROLE_LABEL[role] .. ".")
+    ns.Print("Applied to " .. ns.ShortName(leader) .. "'s " .. ns.ListingWhere(l) .. " group as " .. ns.ROLE_LABEL[role] .. ".")
     ns.Fire("LISTINGS_UPDATED")
 end
 
@@ -433,6 +594,15 @@ local function tick()
     for k, a in pairs(ns.available) do
         if now - a.ts > EXPIRE then ns.available[k] = nil; changed = true end
     end
+    -- quest listings come down by themselves
+    local mine = ns.myListing
+    if mine and mine.cat == "QUEST" and ns.Now() - mine.ts > ns.QUEST_LIFETIME then
+        local what = ns.ListingWhere(mine)
+        ns.Delist(true)
+        ns.Print("Your quest listing (" .. what .. ") came down after " .. math.floor(ns.QUEST_LIFETIME / 60) ..
+            " minutes. List it again from the Quests tab if you still need help.")
+        changed = false
+    end
     if changed then ns.Fire("LISTINGS_UPDATED") end
 end
 
@@ -495,7 +665,7 @@ function ns.SortedAvailable(filterCat)
     for name, a in pairs(ns.available) do
         local keep
         if filterCat == "MATCH" then keep = ns.AvailableMatches(a, ns.myListing)
-        else keep = not filterCat or a.cat == filterCat end
+        else keep = not filterCat or (a.picks and a.picks[filterCat] ~= nil) end
         if keep then
             local row = CopyTable(a); row.name = name
             table.insert(out, row)
@@ -520,6 +690,11 @@ function ns.SortedApplicants()
 end
 
 function ns.NeedsText(l)
+    if l.cat == "QUEST" then
+        local n = l.d or 0
+        if n <= 0 then return "|cff888888full|r" end
+        return "|cffffffff" .. n .. (n == 1 and " player" or " players") .. "|r"
+    end
     local parts = {}
     if l.t > 0 then table.insert(parts, "|c" .. ns.ROLE_COLOR.TANK .. l.t .. " Tank|r") end
     if l.h > 0 then table.insert(parts, "|c" .. ns.ROLE_COLOR.HEAL .. l.h .. " Healer|r") end

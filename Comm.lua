@@ -212,7 +212,12 @@ local function onAddonMessage(prefix, msg, dist, sender, logged)
         ns.myStamped = sender
         return
     end
-    if ns.IsMe(sender) and not ns.selfTest then return end
+    if ns.IsMe(sender) then
+        -- my own message came back from the server: it really went out (see ns.MyAvailableStatus)
+        local kind = msg:match("^([^%^]+)")
+        if kind then ns.Fire("OWN_ECHO", kind) end
+        if not ns.selfTest then return end
+    end
     ns.Fire("SEEN", sender)
     if not ns.InOlympus() then return end
     if #msg > 255 then return end

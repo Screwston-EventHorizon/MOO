@@ -22,11 +22,15 @@ local function norm(n) return (n or ""):lower():gsub("%s", "") end
 local ownerSet = {}
 for _, n in ipairs(OWNERS) do ownerSet[norm(n)] = true end
 
+-- Is this "Name-Realm" one of the owner characters? (Also used for MOO release notices.)
+function ns.IsAuthorName(full)
+    if type(full) ~= "string" then return false end
+    local short = full:match("^(.-)%-[^%-]+$") or full
+    return ownerSet[norm(full)] == true or ownerSet[norm(short)] == true
+end
+
 function ns.IsRecruitOwner()
-    local me = ns.Me()
-    if not me then return false end
-    local short = me:match("^(.-)%-[^%-]+$") or me
-    return ownerSet[norm(me)] == true or ownerSet[norm(short)] == true
+    return ns.IsAuthorName(ns.Me())
 end
 
 local KEYWORDS = {
